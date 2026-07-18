@@ -93,6 +93,7 @@ type NetworkAddress struct {
 type Metrics struct {
 	CPU         CPUMetrics          `json:"cpu"`
 	Memory      MemoryMetrics       `json:"memory"`
+	Disk        DiskMetrics         `json:"disk"`
 	Filesystems []FilesystemMetrics `json:"filesystems"`
 	Network     []NetworkMetrics    `json:"network"`
 }
@@ -113,6 +114,15 @@ type MemoryMetrics struct {
 	SwapTotalBytes uint64 `json:"swap_total_bytes"`
 	SwapUsedBytes  uint64 `json:"swap_used_bytes"`
 	UptimeSeconds  uint64 `json:"uptime_seconds"`
+}
+
+type DiskMetrics struct {
+	ReadBytesTotal  uint64 `json:"read_bytes_total"`
+	WriteBytesTotal uint64 `json:"write_bytes_total"`
+	ReadBytesDelta  uint64 `json:"read_bytes_delta"`
+	WriteBytesDelta uint64 `json:"write_bytes_delta"`
+	ReadOpsDelta    uint64 `json:"read_ops_delta"`
+	WriteOpsDelta   uint64 `json:"write_ops_delta"`
 }
 
 type FilesystemMetrics struct {

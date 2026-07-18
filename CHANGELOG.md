@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.0 - 2026-07-18
+
+### Added
+- Add a public responsive Web dashboard with node cards, full hardware details, and minute/hour history charts.
+- Add public latest-state, node-detail, and ranged-history APIs without changing Agent or admin authentication.
+- Add aggregate disk read/write collection, current rates, raw storage, and hourly rollups.
+
 ## v0.1.0 - 2026-07-18
 
 ### Added

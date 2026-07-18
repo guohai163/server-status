@@ -65,9 +65,9 @@ erDiagram
 | `*_current_metrics` | 每个节点或资源一条最新状态 | 不分区，随新样本更新 |
 | `*_metric_hourly` | 每节点或资源每小时 | UTC 月分区，24 个月 |
 
-`node_metric_samples` 的主键是 `(bucket_at, node_id)`，也是请求幂等键。文件系统和网卡明细通过同一复合键关联主快照，并通过 `(node_id, resource_id)` 复合外键阻止跨节点引用。
+`node_metric_samples` 的主键是 `(bucket_at, node_id)`，也是请求幂等键。它同时保存整机磁盘读写累计值、区间字节数和区间操作数。文件系统和网卡明细通过同一复合键关联主快照，并通过 `(node_id, resource_id)` 复合外键阻止跨节点引用。
 
-文件系统使用率由 `used_bytes / total_bytes` 生成。网卡 current 表的每秒速率由 `bytes_delta * 8 / interval_seconds` 生成。累计计数用于审计和处理计数器重置，区间增量用于趋势和汇总。
+文件系统使用率由 `used_bytes / total_bytes` 生成。网卡 current 表的每秒速率由 `bytes_delta * 8 / interval_seconds` 生成，磁盘 current 表的每秒字节数由 `bytes_delta / interval_seconds` 生成。累计计数用于审计和处理计数器重置，区间增量用于趋势和汇总；节点小时表保存磁盘读写字节合计以及平均/峰值速率。
 
 ## 上报事务
 
@@ -119,11 +119,12 @@ SELECT monitoring.rollup_hour($1::timestamptz);
 
 ## 部署与验证
 
-迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，先安全脱离分区再删除，确保指向节点分钟父表的外键不会被级联删除。在连接信息由环境或 `.pgpass` 提供的前提下执行：
+迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总。在连接信息由环境或 `.pgpass` 提供的前提下执行：
 
 ```bash
 psql -v ON_ERROR_STOP=1 -f db/migrations/V001__monitoring_schema.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V002__safe_partition_retention.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V003__disk_io_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/verify/V001__verify.sql
 ```
 

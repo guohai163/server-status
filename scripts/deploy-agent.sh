@@ -55,7 +55,7 @@ payload = {
     "os_name": os_name,
     "os_version": os_version,
     "architecture": architecture,
-    "agent_version": "0.1.0",
+    "agent_version": "0.2.0",
     "labels": {"environment": environment, "address": address},
 }
 if agent_id:

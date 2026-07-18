@@ -31,6 +31,7 @@ type dataStore interface {
 	RegisterNode(context.Context, store.RegisterNodeInput) (store.NodeCredentials, error)
 	ListNodes(context.Context) ([]store.NodeSummary, error)
 	GetNode(context.Context, string) (store.NodeDetail, error)
+	GetNodeHistory(context.Context, string, string) (store.NodeHistory, error)
 }
 
 func NewAPI(database dataStore, adminToken string, logger *slog.Logger) *API {
@@ -43,9 +44,13 @@ func NewAPI(database dataStore, adminToken string, logger *slog.Logger) *API {
 	api.mux.HandleFunc("GET /healthz", api.health)
 	api.mux.HandleFunc("GET /readyz", api.ready)
 	api.mux.HandleFunc("POST /api/v1/reports", api.report)
+	api.mux.HandleFunc("GET /api/v1/nodes", api.listNodes)
+	api.mux.HandleFunc("GET /api/v1/nodes/{nodeID}", api.getNode)
+	api.mux.HandleFunc("GET /api/v1/nodes/{nodeID}/history", api.getNodeHistory)
 	api.mux.HandleFunc("POST /api/v1/admin/nodes", api.requireAdmin(api.registerNode))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes", api.requireAdmin(api.listNodes))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes/{nodeID}", api.requireAdmin(api.getNode))
+	api.registerWebRoutes()
 	return api
 }
 
@@ -166,6 +171,35 @@ func (api *API) getNode(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(response, http.StatusOK, detail)
+}
+
+func (api *API) getNodeHistory(response http.ResponseWriter, request *http.Request) {
+	nodeID := request.PathValue("nodeID")
+	if !report.ValidUUID(nodeID) {
+		writeError(response, http.StatusBadRequest, "invalid node id")
+		return
+	}
+	window := request.URL.Query().Get("range")
+	if window == "" {
+		window = "24h"
+	}
+	if !store.ValidHistoryRange(window) {
+		writeError(response, http.StatusBadRequest, "range must be one of 1h, 6h, 24h, 7d, 30d, or 90d")
+		return
+	}
+	ctx, cancel := contextWithTimeout(request, 15*time.Second)
+	defer cancel()
+	history, err := api.store.GetNodeHistory(ctx, nodeID, window)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(response, http.StatusNotFound, "node not found")
+		return
+	}
+	if err != nil {
+		api.logger.Error("get node history failed", "node_id", nodeID, "range", window, "error", err)
+		writeError(response, http.StatusInternalServerError, "cannot get node history")
+		return
+	}
+	writeJSON(response, http.StatusOK, history)
 }
 
 func (api *API) requireAdmin(next http.HandlerFunc) http.HandlerFunc {

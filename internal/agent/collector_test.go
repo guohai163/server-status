@@ -1,6 +1,10 @@
 package agent
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/shirou/gopsutil/v4/disk"
+)
 
 func TestParseDMIMemoryModules(t *testing.T) {
 	input := `
@@ -60,5 +64,16 @@ func TestFallbackBlockModel(t *testing.T) {
 	}
 	if got := fallbackBlockModel("sda", ""); got != "Block Device (sda)" {
 		t.Fatalf("unexpected generic fallback model: %s", got)
+	}
+}
+
+func TestDiskCounterDeltaAggregation(t *testing.T) {
+	collector := NewCollector()
+	collector.previousDisk["sda"] = disk.IOCountersStat{ReadBytes: 100, WriteBytes: 200, ReadCount: 4, WriteCount: 8}
+	metric := aggregateDiskCounters(collector.previousDisk, []string{"sda"}, map[string]disk.IOCountersStat{
+		"sda": {ReadBytes: 160, WriteBytes: 290, ReadCount: 7, WriteCount: 10},
+	})
+	if metric.ReadBytesDelta != 60 || metric.WriteBytesDelta != 90 || metric.ReadOpsDelta != 3 || metric.WriteOpsDelta != 2 {
+		t.Fatalf("unexpected disk deltas: %+v", metric)
 	}
 }

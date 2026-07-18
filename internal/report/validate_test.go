@@ -60,6 +60,15 @@ func TestReportValidationRejectsUnknownResource(t *testing.T) {
 	}
 }
 
+func TestReportValidationRejectsDiskCounterOutsideBigint(t *testing.T) {
+	now := time.Now().UTC()
+	payload := validTestReport(t, now)
+	payload.Metrics.Disk.ReadBytesTotal = ^uint64(0)
+	if err := payload.Validate(now); err == nil {
+		t.Fatal("disk counter outside PostgreSQL bigint was accepted")
+	}
+}
+
 func validTestReport(t *testing.T, now time.Time) Report {
 	t.Helper()
 	inventory := Inventory{

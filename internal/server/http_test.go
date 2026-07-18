@@ -41,6 +41,9 @@ func (fake *fakeStore) ListNodes(context.Context) ([]store.NodeSummary, error) {
 func (fake *fakeStore) GetNode(context.Context, string) (store.NodeDetail, error) {
 	return store.NodeDetail{}, store.ErrNotFound
 }
+func (fake *fakeStore) GetNodeHistory(context.Context, string, string) (store.NodeHistory, error) {
+	return store.NodeHistory{}, store.ErrNotFound
+}
 
 func TestHealth(t *testing.T) {
 	api, _ := testAPI()
@@ -93,6 +96,39 @@ func TestAdminRegistrationRequiresAdminToken(t *testing.T) {
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusCreated || !database.registered {
 		t.Fatalf("authorized registration returned %d, registered=%v", response.Code, database.registered)
+	}
+}
+
+func TestPublicNodeListDoesNotRequireAuthentication(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected public list to return 200, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestWebDashboardIsServed(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected dashboard to return 200, got %d", response.Code)
+	}
+	if contentType := response.Header().Get("Content-Type"); contentType != "text/html; charset=utf-8" {
+		t.Fatalf("unexpected dashboard content type: %s", contentType)
+	}
+}
+
+func TestHistoryRangeValidation(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes/10000000-0000-4000-8000-000000000001/history?range=forever", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid range to return 400, got %d", response.Code)
 	}
 }
 

@@ -17,6 +17,8 @@ ssh gydev@10.12.54.200 'docker ps --filter name=server-status-central'
 curl http://10.12.54.200:8080/readyz
 ```
 
+浏览器访问 `http://10.12.54.200:8080/` 即可打开无需鉴权的节点看板。公开范围只包括状态展示接口；节点上报和节点注册仍需要各自的 Bearer Token。
+
 数据库使用专用登录角色 `server_status_app`，该角色只继承 `server_status_writer`，没有超级用户、建库或建角色权限。
 
 ## 节点 Agent

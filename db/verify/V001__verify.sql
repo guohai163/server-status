@@ -171,20 +171,26 @@ INSERT INTO monitoring.node_metric_samples (
     cpu_usage_percent, load_1, load_5, load_15,
     memory_total_bytes, memory_used_bytes, memory_available_bytes,
     memory_cached_bytes, memory_buffers_bytes,
-    swap_total_bytes, swap_used_bytes, uptime_seconds
+    swap_total_bytes, swap_used_bytes, uptime_seconds,
+    disk_read_bytes_total, disk_write_bytes_total,
+    disk_read_bytes_delta, disk_write_bytes_delta,
+    disk_read_ops_delta, disk_write_ops_delta
 ) VALUES
     (date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '50 minutes',
      '10000000-0000-0000-0000-000000000001',
      date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '50 minutes', 60,
-     20, 0.5, 0.4, 0.3, 1000, 400, 500, 100, 20, 200, 20, 10000),
+     20, 0.5, 0.4, 0.3, 1000, 400, 500, 100, 20, 200, 20, 10000,
+     100000, 200000, 6000, 3000, 10, 5),
     (date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '49 minutes',
      '10000000-0000-0000-0000-000000000001',
      date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '49 minutes', 60,
-     40, 1.5, 1.0, 0.7, 1000, 600, 300, 100, 20, 200, 40, 10060),
+     40, 1.5, 1.0, 0.7, 1000, 600, 300, 100, 20, 200, 40, 10060,
+     112000, 206000, 12000, 6000, 20, 10),
     (date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '50 minutes',
      '10000000-0000-0000-0000-000000000002',
      date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '50 minutes', 60,
-     10, 0.1, 0.1, 0.1, 1000, 100, 800, 50, 10, 0, 0, 5000);
+     10, 0.1, 0.1, 0.1, 1000, 100, 800, 50, 10, 0, 0, 5000,
+     1000, 2000, 0, 0, 0, 0);
 
 INSERT INTO monitoring.filesystem_metric_samples (
     bucket_at, node_id, filesystem_id,
@@ -253,6 +259,13 @@ BEGIN
      WHERE node_id = '10000000-0000-0000-0000-000000000001';
     IF v_number <> 60 THEN
         RAISE EXCEPTION 'node current metrics were not refreshed by retry';
+    END IF;
+
+    SELECT disk_read_bytes_per_second INTO v_number
+      FROM monitoring.node_current_metrics
+     WHERE node_id = '10000000-0000-0000-0000-000000000001';
+    IF v_number <> 200 THEN
+        RAISE EXCEPTION 'disk generated read rate is incorrect: %', v_number;
     END IF;
 
     SELECT used_percent INTO v_number
@@ -385,6 +398,22 @@ BEGIN
        AND node_id = '10000000-0000-0000-0000-000000000001';
     IF v_number <> 40 THEN
         RAISE EXCEPTION 'node hourly CPU average is incorrect: %', v_number;
+    END IF;
+
+    SELECT disk_read_bytes INTO v_number
+      FROM monitoring.node_metric_hourly
+     WHERE hour_at = date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '1 hour'
+       AND node_id = '10000000-0000-0000-0000-000000000001';
+    IF v_number <> 18000 THEN
+        RAISE EXCEPTION 'node hourly disk read bytes are incorrect: %', v_number;
+    END IF;
+
+    SELECT disk_read_bytes_per_second_avg INTO v_number
+      FROM monitoring.node_metric_hourly
+     WHERE hour_at = date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '1 hour'
+       AND node_id = '10000000-0000-0000-0000-000000000001';
+    IF v_number <> 150 THEN
+        RAISE EXCEPTION 'node hourly disk read average is incorrect: %', v_number;
     END IF;
 
     SELECT usage_avg INTO v_number

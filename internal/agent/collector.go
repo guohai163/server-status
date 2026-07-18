@@ -25,16 +25,20 @@ import (
 	gnet "github.com/shirou/gopsutil/v4/net"
 )
 
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 type Collector struct {
 	mu             sync.Mutex
 	previousNet    map[string]gnet.IOCountersStat
+	previousDisk   map[string]disk.IOCountersStat
 	lastCollection time.Time
 }
 
 func NewCollector() *Collector {
-	return &Collector{previousNet: make(map[string]gnet.IOCountersStat)}
+	return &Collector{
+		previousNet:  make(map[string]gnet.IOCountersStat),
+		previousDisk: make(map[string]disk.IOCountersStat),
+	}
 }
 
 func (collector *Collector) Collect(ctx context.Context, config Config) (report.Report, error) {
@@ -77,6 +81,10 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 		}}
 	}
 	blockDevices, err := collectBlockDevices()
+	if err != nil {
+		return report.Report{}, err
+	}
+	diskMetrics, err := collector.collectDisk(ctx, blockDevices)
 	if err != nil {
 		return report.Report{}, err
 	}
@@ -143,6 +151,7 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 				SwapUsedBytes:  swapMemory.Used,
 				UptimeSeconds:  hostInfo.Uptime,
 			},
+			Disk:        diskMetrics,
 			Filesystems: filesystemMetrics,
 			Network:     networkMetrics,
 		},
@@ -153,6 +162,47 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 		return report.Report{}, fmt.Errorf("fingerprint inventory: %w", err)
 	}
 	return payload, nil
+}
+
+func (collector *Collector) collectDisk(ctx context.Context, devices []report.BlockDevice) (report.DiskMetrics, error) {
+	names := make([]string, 0, len(devices))
+	for _, device := range devices {
+		if device.DeviceKind == "disk" {
+			names = append(names, filepath.Base(device.DeviceName))
+		}
+	}
+	if len(names) == 0 {
+		return report.DiskMetrics{}, nil
+	}
+	counters, err := disk.IOCountersWithContext(ctx, names...)
+	if err != nil {
+		return report.DiskMetrics{}, fmt.Errorf("collect disk counters: %w", err)
+	}
+	var metric report.DiskMetrics
+	collector.mu.Lock()
+	defer collector.mu.Unlock()
+	metric = aggregateDiskCounters(collector.previousDisk, names, counters)
+	return metric, nil
+}
+
+func aggregateDiskCounters(previousByName map[string]disk.IOCountersStat, names []string, counters map[string]disk.IOCountersStat) report.DiskMetrics {
+	var metric report.DiskMetrics
+	for _, name := range names {
+		current, ok := counters[name]
+		if !ok {
+			continue
+		}
+		metric.ReadBytesTotal += current.ReadBytes
+		metric.WriteBytesTotal += current.WriteBytes
+		if previous, exists := previousByName[name]; exists {
+			metric.ReadBytesDelta += counterDelta(current.ReadBytes, previous.ReadBytes)
+			metric.WriteBytesDelta += counterDelta(current.WriteBytes, previous.WriteBytes)
+			metric.ReadOpsDelta += counterDelta(current.ReadCount, previous.ReadCount)
+			metric.WriteOpsDelta += counterDelta(current.WriteCount, previous.WriteCount)
+		}
+		previousByName[name] = current
+	}
+	return metric
 }
 
 func collectCPUInventory(ctx context.Context) ([]report.CPUPackage, error) {

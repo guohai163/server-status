@@ -3,7 +3,7 @@
 Server Status 是一个面向 Linux 服务器的轻量监控系统，由节点 Agent、中心 API 和 PostgreSQL 三部分组成。
 
 - `server-status-agent`：运行在 Ubuntu/CentOS，默认每分钟采集一次服务器状态。
-- `server-status-server`：以 Docker 容器运行，负责鉴权、校验、事务入库、查询和定时汇总。
+- `server-status-server`：以 Docker 容器运行，负责鉴权、校验、事务入库、查询、定时汇总和 Web 数据展示。
 - PostgreSQL：保存节点身份、硬件变更历史、分钟原始指标、最新状态和小时汇总。
 
 当前默认部署目标：
@@ -20,7 +20,7 @@ Server Status 是一个面向 Linux 服务器的轻量监控系统，由节点 A
 | --- | --- | --- |
 | CPU | 厂商、型号、封装数、物理核心、逻辑线程 | 总使用率、1/5/15 分钟 load |
 | 内存 | 插槽、厂商、型号、序列号、类型、容量、速率 | 总量、已用、可用、缓存、buffer、swap |
-| 磁盘 | 设备名、厂商、型号、序列号、WWN、介质类型、容量 | 挂载点总量、已用量、可用量、inode 使用情况 |
+| 磁盘 | 设备名、厂商、型号、序列号、WWN、介质类型、容量 | 挂载点容量和 inode、整机磁盘读写字节与 IOPS 增量 |
 | 网络 | 网卡、MAC、MTU、链路速率、IPv4/IPv6 | 链路状态、收发累计量、区间流量、包、错误和丢包 |
 
 磁盘硬件和文件系统使用率分别建模。这样可以正确处理 LVM、RAID、多挂载点和一个文件系统跨多个块设备的情况。
@@ -32,7 +32,7 @@ Server Status 是一个面向 Linux 服务器的轻量监控系统，由节点 A
 1. 启动后立即采集一次，以后保持约 60 秒的采集起点间隔。
 2. 从 `/proc`、`/sys` 和系统 API 读取 CPU、内存、块设备、文件系统和网卡状态。
 3. 对硬件清单排序并计算 SHA-256 指纹。
-4. 计算网卡累计计数与上一次采集值的差值；计数器重置时本次增量记为 0。
+4. 计算网卡和磁盘累计计数与上一次采集值的差值；计数器重置时本次增量记为 0。
 5. 使用节点专属 Bearer Token 将完整 JSON 快照发送到中心 `/api/v1/reports`。
 6. 网络错误、HTTP 429 或 5xx 会在本采集周期内短退避重试最多 3 次；认证和数据校验类 4xx 不重试。持续失败也不会退出进程，下一个采集周期继续尝试。
 
@@ -54,7 +54,7 @@ Server Status 是一个面向 Linux 服务器的轻量监控系统，由节点 A
 flowchart TD
     A["Agent 启动或进入下一分钟"] --> B["采集 CPU、内存、磁盘、文件系统、网卡和 IP"]
     B --> C["排序硬件清单并计算 SHA-256 指纹"]
-    C --> D["计算网络区间流量并组装 JSON 快照"]
+    C --> D["计算网络与磁盘区间增量并组装 JSON 快照"]
     D --> E["POST /api/v1/reports<br/>Bearer Node Token"]
     E --> F{"Token、时间和数据校验通过?"}
     F -- "否" --> G["返回 4xx/5xx<br/>Agent 下周期重试"]
@@ -67,7 +67,7 @@ flowchart TD
     L --> M["替换该分钟的文件系统和网卡明细"]
     M --> N["触发器更新 current 表"]
     N --> O["提交事务并返回 202 Accepted"]
-    O --> P["状态 API / 仪表盘查询"]
+    O --> P["公开状态 API / Web 仪表盘查询"]
     Q["每小时后台任务"] --> R["小时汇总、预建分区、清理过期分区"]
     L --> Q
 ```
@@ -109,6 +109,7 @@ make build-agent-linux
 ```bash
 psql -v ON_ERROR_STOP=1 -f db/migrations/V001__monitoring_schema.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V002__safe_partition_retention.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V003__disk_io_metrics.sql
 ```
 
 中央服务应使用继承 `server_status_writer` 的独立登录角色，不要使用 PostgreSQL 超级用户。
@@ -139,6 +140,8 @@ curl http://127.0.0.1:8080/readyz
 ```
 
 中心容器使用非 root 用户、只读根文件系统、移除全部 capabilities，并配置 `unless-stopped` 自动恢复。
+
+部署完成后直接访问 `http://中心节点地址:8080/`。Web 看板不需要登录：首屏以卡片显示所有节点的机器名、IP、CPU、内存、磁盘使用率和磁盘读写速率；点击卡片进入硬件、文件系统、网卡和历史趋势详情。节点上报和管理接口仍分别使用 Node Token 与 Admin Token。
 
 ## 一个脚本部署 Agent
 
@@ -192,6 +195,10 @@ Agent 配置字段参考 `deploy/agent.env.example`。如果目标机具备 syst
 | --- | --- | --- | --- |
 | `GET` | `/healthz` | 无 | 检查中心进程存活 |
 | `GET` | `/readyz` | 无 | 检查数据库和迁移就绪 |
+| `GET` | `/` | 无 | Web 节点状态看板 |
+| `GET` | `/api/v1/nodes` | 无 | 查询所有节点最新卡片数据 |
+| `GET` | `/api/v1/nodes/{node_id}` | 无 | 查询节点完整硬件与运行状态 |
+| `GET` | `/api/v1/nodes/{node_id}/history?range=24h` | 无 | 查询 `1h/6h/24h/7d/30d/90d` 历史趋势 |
 | `POST` | `/api/v1/reports` | Node Token | 接收一分钟快照 |
 | `POST` | `/api/v1/admin/nodes` | Admin Token | 注册节点或轮换节点 Token |
 | `GET` | `/api/v1/admin/nodes` | Admin Token | 查询节点状态列表 |

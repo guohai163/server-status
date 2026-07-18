@@ -71,17 +71,22 @@ func (store *Store) Ingest(ctx context.Context, auth NodeAuth, payload report.Re
 
 	memory := payload.Metrics.Memory
 	cpu := payload.Metrics.CPU
+	disk := payload.Metrics.Disk
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO monitoring.node_metric_samples (
 			bucket_at, node_id, collected_at, received_at, interval_seconds,
 			cpu_usage_percent, load_1, load_5, load_15,
 			memory_total_bytes, memory_used_bytes, memory_available_bytes,
 			memory_cached_bytes, memory_buffers_bytes,
-			swap_total_bytes, swap_used_bytes, uptime_seconds
+			swap_total_bytes, swap_used_bytes, uptime_seconds,
+			disk_read_bytes_total, disk_write_bytes_total,
+			disk_read_bytes_delta, disk_write_bytes_delta,
+			disk_read_ops_delta, disk_write_ops_delta
 		) VALUES (
 			$1, $2::uuid, $3, $4, $5,
 			$6, $7, $8, $9,
-			$10, $11, $12, $13, $14, $15, $16, $17
+			$10, $11, $12, $13, $14, $15, $16, $17,
+			$18, $19, $20, $21, $22, $23
 		)
 		ON CONFLICT (bucket_at, node_id) DO UPDATE SET
 			collected_at = EXCLUDED.collected_at,
@@ -98,12 +103,21 @@ func (store *Store) Ingest(ctx context.Context, auth NodeAuth, payload report.Re
 			memory_buffers_bytes = EXCLUDED.memory_buffers_bytes,
 			swap_total_bytes = EXCLUDED.swap_total_bytes,
 			swap_used_bytes = EXCLUDED.swap_used_bytes,
-			uptime_seconds = EXCLUDED.uptime_seconds
+			uptime_seconds = EXCLUDED.uptime_seconds,
+			disk_read_bytes_total = EXCLUDED.disk_read_bytes_total,
+			disk_write_bytes_total = EXCLUDED.disk_write_bytes_total,
+			disk_read_bytes_delta = EXCLUDED.disk_read_bytes_delta,
+			disk_write_bytes_delta = EXCLUDED.disk_write_bytes_delta,
+			disk_read_ops_delta = EXCLUDED.disk_read_ops_delta,
+			disk_write_ops_delta = EXCLUDED.disk_write_ops_delta
 	`, bucketAt, auth.NodeID, payload.CollectedAt.UTC(), receivedAt, payload.IntervalSeconds,
 		cpu.UsagePercent, cpu.Load1, cpu.Load5, cpu.Load15,
 		i64(memory.TotalBytes), i64(memory.UsedBytes), i64(memory.AvailableBytes),
 		i64(memory.CachedBytes), i64(memory.BuffersBytes),
-		i64(memory.SwapTotalBytes), i64(memory.SwapUsedBytes), i64(memory.UptimeSeconds)); err != nil {
+		i64(memory.SwapTotalBytes), i64(memory.SwapUsedBytes), i64(memory.UptimeSeconds),
+		i64(disk.ReadBytesTotal), i64(disk.WriteBytesTotal),
+		i64(disk.ReadBytesDelta), i64(disk.WriteBytesDelta),
+		i64(disk.ReadOpsDelta), i64(disk.WriteOpsDelta)); err != nil {
 		return fmt.Errorf("upsert node sample: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM monitoring.filesystem_metric_samples WHERE bucket_at = $1 AND node_id = $2::uuid`, bucketAt, auth.NodeID); err != nil {

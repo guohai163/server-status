@@ -135,6 +135,13 @@ func validateMetrics(inventory Inventory, metrics Metrics) error {
 	if metrics.Memory.UsedBytes > metrics.Memory.TotalBytes || metrics.Memory.AvailableBytes > metrics.Memory.TotalBytes || metrics.Memory.CachedBytes > metrics.Memory.TotalBytes || metrics.Memory.BuffersBytes > metrics.Memory.TotalBytes || metrics.Memory.SwapUsedBytes > metrics.Memory.SwapTotalBytes {
 		return errors.New("memory metrics exceed their totals")
 	}
+	if err := validateUnsignedBigints(
+		metrics.Disk.ReadBytesTotal, metrics.Disk.WriteBytesTotal,
+		metrics.Disk.ReadBytesDelta, metrics.Disk.WriteBytesDelta,
+		metrics.Disk.ReadOpsDelta, metrics.Disk.WriteOpsDelta,
+	); err != nil {
+		return fmt.Errorf("disk metrics: %w", err)
+	}
 	filesystemKeys := make(map[string]struct{}, len(inventory.Filesystems))
 	for _, item := range inventory.Filesystems {
 		filesystemKeys[item.Key] = struct{}{}
