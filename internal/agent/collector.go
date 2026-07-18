@@ -25,7 +25,7 @@ import (
 	gnet "github.com/shirou/gopsutil/v4/net"
 )
 
-const Version = "0.2.0"
+var Version = "dev"
 
 type Collector struct {
 	mu             sync.Mutex

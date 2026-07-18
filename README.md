@@ -92,6 +92,7 @@ go test -race ./...
 go vet ./...
 make build
 make build-agent-linux
+make build-agent-release VERSION=0.3.0
 ```
 
 产物：
@@ -99,6 +100,32 @@ make build-agent-linux
 - `bin/server-status-server`：当前开发平台的中心程序。
 - `bin/server-status-agent`：当前开发平台的 Agent。
 - `dist/server-status-agent-linux-amd64`：Ubuntu/CentOS x86_64 静态 Agent。
+- `dist/release/server-status-agent-linux-{amd64,arm64}`：带版本信息的发布二进制。
+- `dist/release/checksums.txt`：发布二进制的 SHA-256 校验值。
+
+Agent 版本由构建时注入，可以直接检查：
+
+```bash
+server-status-agent --version
+```
+
+## Tag 自动发布
+
+推送符合 `v*.*.*` 的 tag 后，[Release 工作流](.github/workflows/release.yml) 自动完成：
+
+1. 运行 `go test ./...` 和 `go vet ./...`。
+2. 构建 `linux/amd64` 与 `linux/arm64` 的完全静态 Agent，并附加到同名 GitHub Release。
+3. 生成 `checksums.txt`，用于节点安装前校验文件完整性。
+4. 构建 `linux/amd64`、`linux/arm64` 中心镜像，发布到 `ghcr.io/guohai163/server-status-central`。
+5. 为镜像生成 `版本号`、`主版本.次版本` 和 `latest` 标签，并发布 SBOM 与构建来源证明。
+
+例如发布 `v0.3.0` 后：
+
+```bash
+docker pull ghcr.io/guohai163/server-status-central:0.3.0
+```
+
+工作流使用 GitHub 自动提供的 `GITHUB_TOKEN`，仓库无需配置 GHCR 用户名或密码。Token 权限被限制为 Release 所需的 `contents: write` 以及镜像任务所需的 `packages/attestations/id-token`。
 
 ## 部署中心服务
 
@@ -174,6 +201,7 @@ curl http://127.0.0.1:8080/readyz
 | `SERVER_STATUS_CENTRAL_DIR` | `server-status-central` | 中心机部署目录 |
 | `SERVER_STATUS_AGENT_ENVIRONMENT` | `production` | 写入节点 labels 的环境名 |
 | `SERVER_STATUS_AGENT_BINARY` | `dist/server-status-agent-linux-amd64` | 自定义 Agent 二进制 |
+| `SERVER_STATUS_AGENT_VERSION` | 当前 Git tag | 覆盖构建和注册时使用的 Agent 版本 |
 
 部署其他节点示例：
 

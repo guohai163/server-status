@@ -61,3 +61,15 @@ SERVER_STATUS_AGENT_ENV_FILE=/secure/agent.env ./scripts/deploy-agent.sh
 ```
 
 部署脚本不会在仓库保存数据库密码、管理员 Token 或节点 Token。Agent 更新采用上传临时文件后原子替换，避免覆盖运行中二进制时出现 `Text file busy`。
+
+## 发布产物
+
+推送语义版本 tag 后，GitHub Actions 会在对应 GitHub Release 发布以下文件：
+
+- `server-status-agent-linux-amd64`：Ubuntu/CentOS/RHEL x86_64 静态二进制。
+- `server-status-agent-linux-arm64`：Ubuntu/CentOS/RHEL arm64 静态二进制。
+- `checksums.txt`：两个二进制的 SHA-256 校验值。
+
+中心服务镜像发布到 `ghcr.io/guohai163/server-status-central`，支持 `linux/amd64` 和 `linux/arm64`。正式版本可用完整版本号拉取，`latest` 始终指向最后一次稳定 tag 构建。
+
+兼容性基线在 `root@10.12.54.140:63008` 的 CentOS 7.8 和 `root@10.12.54.1:63008` 的 RHEL 6.4 上验证。后者使用 glibc 2.12 与 Linux 2.6.32，发布 Agent 仍能启动、采集并进入发送阶段；产物不依赖目标机 glibc。

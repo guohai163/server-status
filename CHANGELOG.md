@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.0 - 2026-07-18
+
+### Added
+- Add a tag-triggered GitHub Actions release workflow that publishes versioned static Agent binaries and checksums to GitHub Releases.
+- Add multi-architecture central server image publishing to GHCR with semantic tags, SBOM, and provenance attestations.
+- Add a reusable Agent release builder and a `--version` command with build-time tag injection.
+
+### Changed
+- Make the Dockerfile cross-compile for the requested Buildx target while preserving dependency-layer caching.
+- Make local and one-command Agent builds use the same injected version and baseline amd64 instruction set as release builds.
+
 ## v0.2.0 - 2026-07-18
 
 ### Added

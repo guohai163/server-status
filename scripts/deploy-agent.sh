@@ -9,6 +9,8 @@ ENV_FILE="${SERVER_STATUS_AGENT_ENV_FILE:-}"
 BINARY_OVERRIDE="${SERVER_STATUS_AGENT_BINARY:-}"
 BINARY="${BINARY_OVERRIDE:-dist/server-status-agent-linux-amd64}"
 LABEL_ENVIRONMENT="${SERVER_STATUS_AGENT_ENVIRONMENT:-production}"
+AGENT_VERSION="${SERVER_STATUS_AGENT_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || printf 'dev')}"
+AGENT_VERSION="${AGENT_VERSION#v}"
 TMP_DIR=""
 
 cleanup() {
@@ -25,7 +27,7 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 if [ -z "$BINARY_OVERRIDE" ]; then
-  make build-agent-linux
+  make build-agent-linux VERSION="$AGENT_VERSION"
 elif [ ! -x "$BINARY" ]; then
   echo "SERVER_STATUS_AGENT_BINARY is not executable: $BINARY" >&2
   exit 1
@@ -48,20 +50,20 @@ if [ -z "$ENV_FILE" ]; then
 
   REGISTRATION_PAYLOAD=$(python3 -c '
 import json, sys
-hostname, os_name, os_version, architecture, address, environment, agent_id = sys.argv[1:]
+hostname, os_name, os_version, architecture, address, environment, agent_id, agent_version = sys.argv[1:]
 payload = {
     "hostname": hostname,
     "display_name": address,
     "os_name": os_name,
     "os_version": os_version,
     "architecture": architecture,
-    "agent_version": "0.2.0",
+    "agent_version": agent_version,
     "labels": {"environment": environment, "address": address},
 }
 if agent_id:
     payload["agent_id"] = agent_id
 print(json.dumps(payload, separators=(",", ":")))
-' "$NODE_HOSTNAME" "$NODE_OS_NAME" "$NODE_OS_VERSION" "$NODE_ARCHITECTURE" "$NODE_ADDRESS" "$LABEL_ENVIRONMENT" "$EXISTING_AGENT_ID")
+' "$NODE_HOSTNAME" "$NODE_OS_NAME" "$NODE_OS_VERSION" "$NODE_ARCHITECTURE" "$NODE_ADDRESS" "$LABEL_ENVIRONMENT" "$EXISTING_AGENT_ID" "$AGENT_VERSION")
 
   echo "[3/6] Registering the node through $CENTRAL_TARGET"
   REGISTRATION_RESPONSE=$(printf '%s' "$REGISTRATION_PAYLOAD" | ssh "$CENTRAL_TARGET" "
