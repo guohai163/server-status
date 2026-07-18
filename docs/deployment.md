@@ -40,6 +40,25 @@ ssh gydev@10.12.54.169 'tail -f ~/.local/state/server-status-agent/agent.log'
 
 该节点是虚拟机，普通用户不能读取 DMI 内存表，Virtio 设备也没有公开具体磁盘型号。Agent 会分别报告 `System Memory (DMI unavailable)` 和 `Virtio Block Device (vda)`，同时正常上报数量、容量及使用率。
 
+### 长期验证节点
+
+以下节点保留常驻部署，供中心看板和接口联调：
+
+| SSH | 系统 | Agent | 守护方式 |
+| --- | --- | --- | --- |
+| `root@10.12.54.140:63008` | CentOS 7.8.2003 | `0.3.2` | root crontab 开机启动及每 5 分钟存活检查 |
+| `root@10.12.54.1:63008` | RHEL 6.4 | `0.3.2` | root crontab 开机启动及每 5 分钟存活检查 |
+
+两台 root 节点的二进制、配置和日志分别位于 `/root/.local/lib/server-status-agent/server-status-agent`、`/root/.config/server-status-agent/env` 和 `/root/.local/state/server-status-agent/agent.log`。配置权限为 `0600`。RHEL 6.4 节点只提供旧版 `ssh-rsa`，部署时需要设置 `SERVER_STATUS_AGENT_LEGACY_SSH=1`。
+
+检查：
+
+```bash
+ssh -p 63008 root@10.12.54.140 'pgrep -af server-status-agent'
+ssh -p 63008 -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa root@10.12.54.1 'pgrep -af server-status-agent'
+curl http://10.12.54.200:8080/api/v1/nodes
+```
+
 ## 更新
 
 中心使用：
@@ -72,4 +91,4 @@ SERVER_STATUS_AGENT_ENV_FILE=/secure/agent.env ./scripts/deploy-agent.sh
 
 中心服务镜像发布到 `ghcr.io/guohai163/server-status-central`，支持 `linux/amd64` 和 `linux/arm64`。正式版本可用完整版本号拉取，`latest` 始终指向最后一次稳定 tag 构建。
 
-兼容性基线在 `root@10.12.54.140:63008` 的 CentOS 7.8 和 `root@10.12.54.1:63008` 的 RHEL 6.4 上验证。后者使用 glibc 2.12 与 Linux 2.6.32，发布 Agent 仍能启动、采集并进入发送阶段；产物不依赖目标机 glibc。
+兼容性基线在 `root@10.12.54.140:63008` 的 CentOS 7.8 和 `root@10.12.54.1:63008` 的 RHEL 6.4 上验证。后者使用 glibc 2.12 与 Linux 2.6.32，发布 Agent 仍能启动、采集并持续成功上报；产物不依赖目标机 glibc。

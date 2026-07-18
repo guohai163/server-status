@@ -197,6 +197,8 @@ curl http://127.0.0.1:8080/readyz
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `SERVER_STATUS_AGENT_TARGET` | `gydev@10.12.54.169` | Agent SSH 目标 |
+| `SERVER_STATUS_AGENT_PORT` | `22` | Agent SSH 端口 |
+| `SERVER_STATUS_AGENT_LEGACY_SSH` | `0` | 设为 `1` 时兼容只支持 `ssh-rsa` 的旧节点 |
 | `SERVER_STATUS_CENTRAL_TARGET` | `gydev@10.12.54.200` | 中心 SSH 目标 |
 | `SERVER_STATUS_URL` | `http://10.12.54.200:8080` | Agent 上报地址 |
 | `SERVER_STATUS_CENTRAL_DIR` | `server-status-central` | 中心机部署目录 |
@@ -208,6 +210,15 @@ curl http://127.0.0.1:8080/readyz
 
 ```bash
 SERVER_STATUS_AGENT_TARGET=ops@10.12.54.170 ./scripts/deploy-agent.sh
+```
+
+旧版 CentOS/RHEL 使用非标准 SSH 端口的示例：
+
+```bash
+SERVER_STATUS_AGENT_TARGET=root@10.12.54.1 \
+SERVER_STATUS_AGENT_PORT=63008 \
+SERVER_STATUS_AGENT_LEGACY_SSH=1 \
+./scripts/deploy-agent.sh
 ```
 
 高级用法仍可传入已经准备好的节点配置，此时脚本跳过自动注册：

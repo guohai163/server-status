@@ -2,6 +2,8 @@
 set -eu
 
 TARGET="${SERVER_STATUS_AGENT_TARGET:-gydev@10.12.54.169}"
+AGENT_PORT="${SERVER_STATUS_AGENT_PORT:-22}"
+LEGACY_SSH="${SERVER_STATUS_AGENT_LEGACY_SSH:-0}"
 CENTRAL_TARGET="${SERVER_STATUS_CENTRAL_TARGET:-gydev@10.12.54.200}"
 CENTRAL_REMOTE_DIR="${SERVER_STATUS_CENTRAL_DIR:-server-status-central}"
 CENTRAL_URL="${SERVER_STATUS_URL:-http://10.12.54.200:8080}"
@@ -12,6 +14,30 @@ LABEL_ENVIRONMENT="${SERVER_STATUS_AGENT_ENVIRONMENT:-production}"
 AGENT_VERSION="${SERVER_STATUS_AGENT_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || printf 'dev')}"
 AGENT_VERSION="${AGENT_VERSION#v}"
 TMP_DIR=""
+
+agent_ssh() {
+  if [ "$LEGACY_SSH" = "1" ]; then
+    ssh -p "$AGENT_PORT" -o BatchMode=yes \
+      -o HostKeyAlgorithms=+ssh-rsa \
+      -o PubkeyAcceptedAlgorithms=+ssh-rsa \
+      "$TARGET" "$@"
+  else
+    ssh -p "$AGENT_PORT" -o BatchMode=yes "$TARGET" "$@"
+  fi
+}
+
+agent_scp() {
+  source=$1
+  destination=$2
+  if [ "$LEGACY_SSH" = "1" ]; then
+    scp -P "$AGENT_PORT" -o BatchMode=yes \
+      -o HostKeyAlgorithms=+ssh-rsa \
+      -o PubkeyAcceptedAlgorithms=+ssh-rsa \
+      "$source" "$TARGET:$destination"
+  else
+    scp -P "$AGENT_PORT" -o BatchMode=yes "$source" "$TARGET:$destination"
+  fi
+}
 
 cleanup() {
   if [ -n "$TMP_DIR" ] && [ -d "$TMP_DIR" ]; then
@@ -34,19 +60,19 @@ elif [ ! -x "$BINARY" ]; then
 fi
 
 echo "[1/6] Preparing $TARGET"
-ssh "$TARGET" 'mkdir -p "$HOME/.local/lib/server-status-agent" "$HOME/.config/server-status-agent" "$HOME/.local/state/server-status-agent"'
-scp "$BINARY" "$TARGET:.local/lib/server-status-agent/server-status-agent.new"
-scp deploy/run-agent.sh "$TARGET:.local/lib/server-status-agent/run-agent.sh"
+agent_ssh 'mkdir -p "$HOME/.local/lib/server-status-agent" "$HOME/.config/server-status-agent" "$HOME/.local/state/server-status-agent"'
+agent_scp "$BINARY" '.local/lib/server-status-agent/server-status-agent.new'
+agent_scp deploy/run-agent.sh '.local/lib/server-status-agent/run-agent.sh'
 
 if [ -z "$ENV_FILE" ]; then
   echo "[2/6] Reading node identity and checking the central API"
-  NODE_HOSTNAME=$(ssh "$TARGET" 'hostname')
-  NODE_OS_NAME=$(ssh "$TARGET" '. /etc/os-release; printf "%s" "${NAME:-Linux}"')
-  NODE_OS_VERSION=$(ssh "$TARGET" '. /etc/os-release; printf "%s" "${VERSION_ID:-unknown}"')
-  NODE_ARCHITECTURE=$(ssh "$TARGET" 'uname -m')
+  NODE_HOSTNAME=$(agent_ssh 'hostname')
+  NODE_OS_NAME=$(agent_ssh 'if [ -r /etc/os-release ]; then . /etc/os-release; printf "%s" "${NAME:-Linux}"; elif [ -r /etc/redhat-release ]; then awk -F " release " "{print \$1}" /etc/redhat-release; else printf "Linux"; fi')
+  NODE_OS_VERSION=$(agent_ssh 'if [ -r /etc/os-release ]; then . /etc/os-release; printf "%s" "${VERSION_ID:-unknown}"; elif [ -r /etc/redhat-release ]; then awk -F " release " "{print \$2}" /etc/redhat-release | awk "{print \$1}"; else printf "unknown"; fi')
+  NODE_ARCHITECTURE=$(agent_ssh 'uname -m')
   NODE_ADDRESS=${TARGET#*@}
-  EXISTING_AGENT_ID=$(ssh "$TARGET" 'sed -n "s/^SERVER_STATUS_AGENT_ID=//p" "$HOME/.config/server-status-agent/env" 2>/dev/null | head -1 || true')
-  ssh "$TARGET" "curl -fsS --max-time 10 '$CENTRAL_URL/readyz' >/dev/null"
+  EXISTING_AGENT_ID=$(agent_ssh 'sed -n "s/^SERVER_STATUS_AGENT_ID=//p" "$HOME/.config/server-status-agent/env" 2>/dev/null | head -1 || true')
+  agent_ssh "curl -fsS --max-time 10 '$CENTRAL_URL/readyz' >/dev/null"
 
   REGISTRATION_PAYLOAD=$(python3 -c '
 import json, sys
@@ -111,8 +137,8 @@ else
 fi
 
 echo "[4/6] Installing the binary and protected configuration"
-scp "$ENV_FILE" "$TARGET:.config/server-status-agent/env.new"
-ssh "$TARGET" '
+agent_scp "$ENV_FILE" '.config/server-status-agent/env.new'
+agent_ssh '
   chmod 700 "$HOME/.local/lib/server-status-agent/server-status-agent.new" "$HOME/.local/lib/server-status-agent/run-agent.sh"
   chmod 600 "$HOME/.config/server-status-agent/env.new"
   mv -f "$HOME/.local/lib/server-status-agent/server-status-agent.new" "$HOME/.local/lib/server-status-agent/server-status-agent"
@@ -120,17 +146,17 @@ ssh "$TARGET" '
 '
 
 echo "[5/6] Installing the reboot entry and watchdog"
-ssh "$TARGET" '(
+agent_ssh '(
   crontab -l 2>/dev/null | grep -v "server-status-agent/run-agent.sh" || true
   echo "@reboot $HOME/.local/lib/server-status-agent/run-agent.sh >>$HOME/.local/state/server-status-agent/agent.log 2>&1 &"
   echo "*/5 * * * * pgrep -u $(id -u) -f \"[s]erver-status-agent/server-status-agent\" >/dev/null || nohup $HOME/.local/lib/server-status-agent/run-agent.sh >>$HOME/.local/state/server-status-agent/agent.log 2>&1 &"
 ) | crontab -'
 
-LOG_BYTES=$(ssh "$TARGET" 'wc -c < "$HOME/.local/state/server-status-agent/agent.log" 2>/dev/null || printf "0"')
-ssh "$TARGET" 'pkill -u "$(id -u)" -f "[s]erver-status-agent/server-status-agent" 2>/dev/null || true; nohup "$HOME/.local/lib/server-status-agent/run-agent.sh" >>"$HOME/.local/state/server-status-agent/agent.log" 2>&1 </dev/null &'
+LOG_BYTES=$(agent_ssh 'if [ -r "$HOME/.local/state/server-status-agent/agent.log" ]; then wc -c < "$HOME/.local/state/server-status-agent/agent.log"; else printf "0"; fi')
+agent_ssh 'pkill -u "$(id -u)" -f "[s]erver-status-agent/server-status-agent" 2>/dev/null || true; nohup "$HOME/.local/lib/server-status-agent/run-agent.sh" >>"$HOME/.local/state/server-status-agent/agent.log" 2>&1 </dev/null &'
 
 echo "[6/6] Waiting for the first accepted report"
-ssh "$TARGET" sh -s -- "$LOG_BYTES" <<'REMOTE_VERIFY'
+agent_ssh sh -s -- "$LOG_BYTES" <<'REMOTE_VERIFY'
 start_byte=$(($1 + 1))
 attempt=0
 while [ "$attempt" -lt 20 ]; do
