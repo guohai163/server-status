@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.1 - 2026-07-18
+
+### Added
+- Add a post-publish job that verifies all Agent release assets and both required GHCR image platforms before the release workflow succeeds.
+
 ## v0.3.0 - 2026-07-18
 
 ### Added

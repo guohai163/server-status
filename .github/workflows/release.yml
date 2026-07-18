@@ -129,3 +129,45 @@ jobs:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+  verify-release:
+    name: Verify published assets
+    needs: [release-agent, publish-central-image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/server-status-central
+    steps:
+      - name: Verify GitHub Release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          assets=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')
+          for expected in \
+            checksums.txt \
+            server-status-agent-linux-amd64 \
+            server-status-agent-linux-arm64; do
+            if ! grep -Fxq "$expected" <<<"$assets"; then
+              echo "missing release asset: $expected" >&2
+              exit 1
+            fi
+          done
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify multi-architecture image
+        shell: bash
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          docker buildx imagetools inspect "$IMAGE:$version" > image-manifest.txt
+          grep -Fq "linux/amd64" image-manifest.txt
+          grep -Fq "linux/arm64" image-manifest.txt
