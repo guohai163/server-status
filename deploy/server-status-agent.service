@@ -1,0 +1,16 @@
+[Unit]
+Description=Server Status Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/server-status-agent/env
+ExecStart=%h/.local/lib/server-status-agent/server-status-agent
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
