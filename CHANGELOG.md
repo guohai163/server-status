@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.2 - 2026-07-18
+
+### Fixed
+- Pass the repository explicitly to GitHub CLI release commands so post-publish verification works without a checked-out working tree.
+
 ## v0.3.1 - 2026-07-18
 
 ### Added

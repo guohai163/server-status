@@ -92,7 +92,7 @@ go test -race ./...
 go vet ./...
 make build
 make build-agent-linux
-make build-agent-release VERSION=0.3.1
+make build-agent-release VERSION=0.3.2
 ```
 
 产物：
@@ -120,10 +120,10 @@ server-status-agent --version
 5. 为镜像生成 `版本号`、`主版本.次版本` 和 `latest` 标签，并发布 SBOM 与构建来源证明。
 6. 发布后重新读取 Release 资产和 GHCR manifest，缺少任一二进制或目标架构会使工作流失败。
 
-例如发布 `v0.3.1` 后：
+例如发布 `v0.3.2` 后：
 
 ```bash
-docker pull ghcr.io/guohai163/server-status-central:0.3.1
+docker pull ghcr.io/guohai163/server-status-central:0.3.2
 ```
 
 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN`，仓库无需配置 GHCR 用户名或密码。Token 权限被限制为 Release 所需的 `contents: write` 以及镜像任务所需的 `packages/attestations/id-token`。

@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: server-status-central:0.3.1
+    image: server-status-central:0.3.2
     container_name: server-status-central
     restart: unless-stopped
     env_file:
