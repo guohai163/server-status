@@ -235,9 +235,14 @@ const nodeSummarySQL = `
 		 LIMIT 1
 	  ) primary_address ON true
 	  LEFT JOIN LATERAL (
-		SELECT max(used_percent) AS used_percent
-		  FROM monitoring.filesystem_current_metrics
-		 WHERE node_id = status.node_id
+		SELECT max(filesystem_metric.used_percent) AS used_percent
+		  FROM monitoring.filesystem_current_metrics filesystem_metric
+		  JOIN monitoring.filesystems filesystem
+		    ON filesystem.node_id = filesystem_metric.node_id
+		   AND filesystem.id = filesystem_metric.filesystem_id
+		 WHERE filesystem_metric.node_id = status.node_id
+		   AND filesystem.removed_at IS NULL
+		   AND NOT ('ro' = ANY(filesystem.mount_options))
 	  ) filesystem_usage ON true
 	  LEFT JOIN LATERAL (
 		SELECT sum(rx_bits_per_second) / 8 AS rx_bytes_per_second,
@@ -471,10 +476,14 @@ const rawHistorySQL = `
 	       COALESCE(network.tx_bytes_delta, 0)::double precision / sample.interval_seconds
 	  FROM monitoring.node_metric_samples sample
 	  LEFT JOIN LATERAL (
-		SELECT max(used_percent) AS used_percent
+		SELECT max(filesystem_sample.used_percent) AS used_percent
 		  FROM monitoring.filesystem_metric_samples filesystem_sample
+		  JOIN monitoring.filesystems filesystem
+		    ON filesystem.node_id = filesystem_sample.node_id
+		   AND filesystem.id = filesystem_sample.filesystem_id
 		 WHERE filesystem_sample.bucket_at = sample.bucket_at
 		   AND filesystem_sample.node_id = sample.node_id
+		   AND NOT ('ro' = ANY(filesystem.mount_options))
 	  ) filesystem ON true
 	  LEFT JOIN LATERAL (
 		SELECT sum(rx_bytes_delta) AS rx_bytes_delta, sum(tx_bytes_delta) AS tx_bytes_delta
@@ -497,10 +506,14 @@ const hourlyHistorySQL = `
 	       COALESCE(network.tx_bytes_per_second, 0)::double precision
 	  FROM monitoring.node_metric_hourly sample
 	  LEFT JOIN LATERAL (
-		SELECT max(usage_avg) AS used_percent
+		SELECT max(filesystem_sample.usage_avg) AS used_percent
 		  FROM monitoring.filesystem_metric_hourly filesystem_sample
+		  JOIN monitoring.filesystems filesystem
+		    ON filesystem.node_id = filesystem_sample.node_id
+		   AND filesystem.id = filesystem_sample.filesystem_id
 		 WHERE filesystem_sample.hour_at = sample.hour_at
 		   AND filesystem_sample.node_id = sample.node_id
+		   AND NOT ('ro' = ANY(filesystem.mount_options))
 	  ) filesystem ON true
 	  LEFT JOIN LATERAL (
 		SELECT sum(rx_bits_per_second_avg) / 8 AS rx_bytes_per_second,

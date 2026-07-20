@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.1 - 2026-07-20
+
+### Fixed
+- Exclude read-only filesystem mounts from current and historical disk-usage aggregation so Snap squashfs images cannot force a node to 100% disk usage.
+
 ## v0.4.0 - 2026-07-20
 
 ### Added
