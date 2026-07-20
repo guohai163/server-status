@@ -16,6 +16,7 @@
       </a>
       <div class="topbar-actions">
         <span id="updated-at" class="updated-at"></span>
+        <button id="add-node-button" class="command-button" type="button">添加节点</button>
         <button id="refresh-button" class="icon-button" type="button" title="刷新数据" aria-label="刷新数据">↻</button>
       </div>
     </div>
@@ -23,6 +24,47 @@
   <main id="app" class="app-shell" aria-live="polite">
     <div class="loading-state"><span class="spinner"></span><span>正在读取节点状态</span></div>
   </main>
+  <dialog id="add-node-dialog" class="node-dialog" aria-labelledby="add-node-title">
+    <div class="dialog-head">
+      <div>
+        <h2 id="add-node-title">添加节点</h2>
+      </div>
+      <button id="close-node-dialog" class="icon-button" type="button" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <form id="add-node-form" class="node-form">
+      <label class="field field-wide">
+        <span>Admin Token</span>
+        <input id="admin-token" name="admin_token" type="password" required autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field field-wide">
+        <span>显示名称</span>
+        <input id="node-display-name" name="display_name" type="text" required maxlength="120" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>环境</span>
+        <input id="node-environment" name="environment" type="text" value="production" maxlength="64" pattern="[A-Za-z0-9._-]{1,64}" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>Agent 版本</span>
+        <input id="agent-version" name="agent_version" type="text" placeholder="latest" pattern="v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?" autocomplete="off">
+      </label>
+      <p id="add-node-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="secondary-button" type="button" data-close-dialog>取消</button>
+        <button id="create-node-button" class="primary-button" type="submit">创建节点</button>
+      </div>
+    </form>
+    <div id="install-command-result" class="install-result" hidden>
+      <div class="install-result-head">
+        <div><strong>安装命令已生成</strong><span>Node Token 仅在本次显示</span></div>
+        <button id="copy-install-command" class="secondary-button" type="button">复制命令</button>
+      </div>
+      <pre><code id="install-command"></code></pre>
+      <div class="dialog-actions">
+        <button class="primary-button" type="button" data-close-dialog>完成</button>
+      </div>
+    </div>
+  </dialog>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

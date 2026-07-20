@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.0 - 2026-07-20
+
+### Added
+- Add dashboard-based node creation with one-time install commands and a centrally hosted Agent installer.
+- Install release binaries for Linux amd64/arm64 under `/opt/server-agent`, verify SHA-256 checksums, and configure an idempotent root crontab watchdog.
+
+### Changed
+- Mark registered nodes without reports as pending and prefer their configured display names in the dashboard.
+- Make GitHub Release installation the default Agent deployment path without requiring Go, Python, a repository checkout, or SSH on the target node.
+- Deploy the central service from the pinned GHCR image instead of building it from source on the target host.
+
 ## v0.3.2 - 2026-07-18
 
 ### Fixed

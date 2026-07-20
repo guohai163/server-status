@@ -1,9 +1,6 @@
 services:
   central:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: server-status-central:0.3.2
+    image: ${SERVER_STATUS_CENTRAL_IMAGE:-ghcr.io/guohai163/server-status-central:0.4.0}
     container_name: server-status-central
     restart: unless-stopped
     env_file:

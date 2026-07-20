@@ -272,7 +272,14 @@ func scanNodeSummary(row scanner) (NodeSummary, error) {
 	if err := json.Unmarshal(labelsJSON, &item.Labels); err != nil {
 		return NodeSummary{}, fmt.Errorf("decode node labels: %w", err)
 	}
+	normalizeNodeSummary(&item)
 	return item, nil
+}
+
+func normalizeNodeSummary(item *NodeSummary) {
+	if item.LatestBucketAt == nil && item.Status != "disabled" {
+		item.Status = "pending"
+	}
 }
 
 func (store *Store) listFilesystems(ctx context.Context, nodeID string) ([]FilesystemStatus, error) {

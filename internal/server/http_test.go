@@ -122,6 +122,32 @@ func TestWebDashboardIsServed(t *testing.T) {
 	}
 }
 
+func TestAgentInstallerIsServedWithoutCaching(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/install-agent.sh", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected installer to return 200, got %d", response.Code)
+	}
+	if contentType := response.Header().Get("Content-Type"); contentType != "text/x-shellscript; charset=utf-8" {
+		t.Fatalf("unexpected installer content type: %s", contentType)
+	}
+	if cacheControl := response.Header().Get("Cache-Control"); cacheControl != "no-store" {
+		t.Fatalf("unexpected installer cache policy: %s", cacheControl)
+	}
+	for _, expected := range []string{
+		"x86_64|amd64", "aarch64|arm64",
+		"releases/latest/download", "releases/download/v$version",
+		"server-status-agent-linux-$architecture", "checksums.txt",
+		"/opt/server-agent", "# server-status-agent-managed",
+	} {
+		if !bytes.Contains(response.Body.Bytes(), []byte(expected)) {
+			t.Fatalf("installer response does not contain %q", expected)
+		}
+	}
+}
+
 func TestHistoryRangeValidation(t *testing.T) {
 	api, _ := testAPI()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes/10000000-0000-4000-8000-000000000001/history?range=forever", nil)

@@ -150,6 +150,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V003__disk_io_metrics.sql
 SERVER_STATUS_DATABASE_URL=postgres://server_status_app:password@postgres:5432/server_status_db?sslmode=disable
 SERVER_STATUS_ADMIN_TOKEN=至少32位随机字符串
 SERVER_STATUS_LISTEN_ADDR=:8080
+SERVER_STATUS_CENTRAL_IMAGE=ghcr.io/guohai163/server-status-central:0.4.0
 ```
 
 Admin Token 只用于节点注册、令牌轮换和管理员查询。
@@ -160,10 +161,11 @@ Admin Token 只用于节点注册、令牌轮换和管理员查询。
 SERVER_STATUS_CENTRAL_ENV_FILE=/secure/central.env ./scripts/deploy-central.sh
 ```
 
-脚本默认部署到 `gydev@10.12.54.200:~/server-status-central`，在目标机执行 Docker 构建和 Compose 启动。也可以直接在中心机执行：
+脚本默认部署到 `gydev@10.12.54.200:~/server-status-central`，只上传 Compose 与环境文件，然后拉取固定版本的 GHCR 镜像。也可以直接在中心机执行：
 
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d --remove-orphans
 curl http://127.0.0.1:8080/readyz
 ```
 
@@ -173,61 +175,35 @@ curl http://127.0.0.1:8080/readyz
 
 ## 一个脚本部署 Agent
 
-执行端需要 Go 1.25、`make`、`python3`、`ssh` 和 `scp`，并能使用本机私钥免交互登录中心机和目标节点。目标节点需要 `curl` 与 `crontab`，中心机需要已经运行的中心容器及权限为 `0600` 的 `.env`。
+目标节点不需要 Go、make、Python、Git 仓库或 SSH 服务，只需 Linux、`sudo`、`curl`、`crontab` 和 `sha256sum`。当前发布支持 `amd64/x86_64` 与 `arm64/aarch64`。
 
-中心服务部署完成后，在本仓库根目录执行：
+1. 打开中心看板，点击右上角“添加节点”。
+2. 输入 Admin Token、节点显示名称和环境名。Agent 版本留空时使用最新 Release，也可以固定为 `0.3.2` 或 `v0.3.2`。
+3. 复制生成的命令，在目标节点执行。
 
-```bash
-./scripts/deploy-agent.sh
-```
-
-不需要预先创建 Agent ID、节点 Token 或 Agent 环境文件。脚本自动完成以下工作：
-
-1. 交叉编译 Linux amd64 静态二进制。
-2. 通过 SSH 读取节点主机名、系统版本、架构和已有 Agent ID。
-3. 从中心机的 `0600` `.env` 读取 Admin Token，并在中心机本地调用注册 API；Admin Token 不会发送到节点。
-4. 首次部署创建节点；重复部署复用 Agent ID 并自动轮换节点 Token。
-5. 上传 `.new` 文件并原子替换运行中的二进制，避免 `Text file busy`。
-6. 写入权限为 `0600` 的 Agent 配置。
-7. 安装 `@reboot` 启动项和每 5 分钟存活检查，随后立即启动 Agent。
-8. 最多等待 20 秒，必须观察到中心接受第一条报告才返回成功。
-
-默认参数：
-
-| 环境变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `SERVER_STATUS_AGENT_TARGET` | `gydev@10.12.54.169` | Agent SSH 目标 |
-| `SERVER_STATUS_AGENT_PORT` | `22` | Agent SSH 端口 |
-| `SERVER_STATUS_AGENT_LEGACY_SSH` | `0` | 设为 `1` 时兼容只支持 `ssh-rsa` 的旧节点 |
-| `SERVER_STATUS_CENTRAL_TARGET` | `gydev@10.12.54.200` | 中心 SSH 目标 |
-| `SERVER_STATUS_URL` | `http://10.12.54.200:8080` | Agent 上报地址 |
-| `SERVER_STATUS_CENTRAL_DIR` | `server-status-central` | 中心机部署目录 |
-| `SERVER_STATUS_AGENT_ENVIRONMENT` | `production` | 写入节点 labels 的环境名 |
-| `SERVER_STATUS_AGENT_BINARY` | `dist/server-status-agent-linux-amd64` | 自定义 Agent 二进制 |
-| `SERVER_STATUS_AGENT_VERSION` | 当前 Git tag | 覆盖构建和注册时使用的 Agent 版本 |
-
-部署其他节点示例：
+命令形态如下，实际内容包含中心生成的节点专属 Agent ID 和 Node Token：
 
 ```bash
-SERVER_STATUS_AGENT_TARGET=ops@10.12.54.170 ./scripts/deploy-agent.sh
+curl -fsSL 'https://中心节点/install-agent.sh' | sudo env \
+  SERVER_STATUS_URL='https://中心节点' \
+  SERVER_STATUS_AGENT_ID='节点 Agent ID' \
+  SERVER_STATUS_TOKEN='节点 Token' \
+  SERVER_STATUS_AGENT_ENVIRONMENT='production' \
+  sh
 ```
 
-旧版 CentOS/RHEL 使用非标准 SSH 端口的示例：
+安装器直接从 `guohai163/server-status` 的 GitHub Release 下载匹配架构的静态二进制和 `checksums.txt`，校验 SHA-256 后原子安装。默认路径：
 
-```bash
-SERVER_STATUS_AGENT_TARGET=root@10.12.54.1 \
-SERVER_STATUS_AGENT_PORT=63008 \
-SERVER_STATUS_AGENT_LEGACY_SSH=1 \
-./scripts/deploy-agent.sh
-```
+| 内容 | 路径 |
+| --- | --- |
+| 二进制 | `/opt/server-agent/server-status-agent` |
+| 启动脚本 | `/opt/server-agent/run-agent.sh` |
+| Agent 配置 | `/opt/server-agent/agent.env`，权限 `0600` |
+| 日志 | `/var/log/server-status-agent.log` |
 
-高级用法仍可传入已经准备好的节点配置，此时脚本跳过自动注册：
+安装器会保留现有无关 crontab，幂等写入 `@reboot` 启动项和每 5 分钟存活检查，立即启动 Agent，并等待中心接受第一条报告。Node Token 会出现在生成命令和目标机 shell 历史中，但仅具备该节点的上报权限；生产环境应使用 HTTPS。
 
-```bash
-SERVER_STATUS_AGENT_ENV_FILE=/secure/agent.env ./scripts/deploy-agent.sh
-```
-
-Agent 配置字段参考 `deploy/agent.env.example`。如果目标机具备 systemd user linger 或 root 部署权限，也可以使用 `deploy/server-status-agent.service`；当前默认脚本不要求 sudo。
+原有 `scripts/deploy-agent.sh` 继续作为兼容的远程部署方式。只有该旧流程需要开发机安装 Go 1.25、`make`、`python3`、`ssh` 和 `scp`，并配置到中心机和 Agent 节点的免交互 SSH。
 
 ## API
 
@@ -236,6 +212,7 @@ Agent 配置字段参考 `deploy/agent.env.example`。如果目标机具备 syst
 | `GET` | `/healthz` | 无 | 检查中心进程存活 |
 | `GET` | `/readyz` | 无 | 检查数据库和迁移就绪 |
 | `GET` | `/` | 无 | Web 节点状态看板 |
+| `GET` | `/install-agent.sh` | 无 | 获取无凭据的 Agent 安装器 |
 | `GET` | `/api/v1/nodes` | 无 | 查询所有节点最新卡片数据 |
 | `GET` | `/api/v1/nodes/{node_id}` | 无 | 查询节点完整硬件与运行状态 |
 | `GET` | `/api/v1/nodes/{node_id}/history?range=24h` | 无 | 查询 `1h/6h/24h/7d/30d/90d` 历史趋势 |

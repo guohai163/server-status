@@ -11,6 +11,6 @@ if [ -z "$ENV_FILE" ] || [ ! -r "$ENV_FILE" ]; then
 fi
 
 ssh "$TARGET" "mkdir -p '$REMOTE_DIR'"
-scp -r Dockerfile compose.yaml .dockerignore go.mod go.sum cmd internal "$TARGET:$REMOTE_DIR/"
+scp compose.yaml "$TARGET:$REMOTE_DIR/"
 scp "$ENV_FILE" "$TARGET:$REMOTE_DIR/.env"
-ssh "$TARGET" "chmod 600 '$REMOTE_DIR/.env' && cd '$REMOTE_DIR' && docker compose up -d --build"
+ssh "$TARGET" "chmod 600 '$REMOTE_DIR/.env' && cd '$REMOTE_DIR' && docker compose pull && docker compose up -d --remove-orphans"

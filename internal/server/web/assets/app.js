@@ -4,6 +4,14 @@
   const app = document.getElementById("app");
   const refreshButton = document.getElementById("refresh-button");
   const updatedAt = document.getElementById("updated-at");
+  const addNodeButton = document.getElementById("add-node-button");
+  const addNodeDialog = document.getElementById("add-node-dialog");
+  const addNodeForm = document.getElementById("add-node-form");
+  const addNodeError = document.getElementById("add-node-error");
+  const createNodeButton = document.getElementById("create-node-button");
+  const installCommandResult = document.getElementById("install-command-result");
+  const installCommand = document.getElementById("install-command");
+  const copyInstallCommand = document.getElementById("copy-install-command");
   const ranges = ["1h", "6h", "24h", "7d", "30d", "90d"];
   let nodes = [];
   let selectedRange = "24h";
@@ -47,9 +55,9 @@
       second: includeSeconds ? "2-digit" : undefined, hour12: false
     }).format(new Date(value));
   }
-  function displayName(node) { return node.hostname || node.display_name; }
+  function displayName(node) { return node.display_name || node.hostname; }
   function usageClass(value) { return value >= 90 ? "danger" : value >= 75 ? "warning" : ""; }
-  function statusText(status) { return ({ online: "在线", offline: "离线", disabled: "已禁用" })[status] || status; }
+  function statusText(status) { return ({ online: "在线", offline: "离线", pending: "待安装", disabled: "已禁用" })[status] || status; }
   function progress(label, value) {
     const percent = clamp(value, 0, 100);
     return `<div class="metric-row"><div class="metric-row-head"><span>${label}</span><strong>${formatPercent(percent)}</strong></div><div class="progress"><i class="${usageClass(percent)}" style="width:${percent}%"></i></div></div>`;
@@ -114,9 +122,10 @@
       <div class="status-counts">
         <span class="status-count"><i class="status-dot online"></i>在线 <strong>${counts.online || 0}</strong></span>
         <span class="status-count"><i class="status-dot offline"></i>离线 <strong>${counts.offline || 0}</strong></span>
+        ${counts.pending ? `<span class="status-count"><i class="status-dot pending"></i>待安装 <strong>${counts.pending}</strong></span>` : ""}
         ${counts.disabled ? `<span class="status-count"><i class="status-dot disabled"></i>禁用 <strong>${counts.disabled}</strong></span>` : ""}
       </div>
-    </div>${nodes.length ? `<div class="node-grid">${cards}</div>` : '<div class="empty-state"><strong>暂无节点</strong><span>节点首次成功上报后会显示在这里</span></div>'}`;
+    </div>${nodes.length ? `<div class="node-grid">${cards}</div>` : '<div class="empty-state"><strong>暂无节点</strong><span>尚未创建监控节点</span></div>'}`;
     app.querySelectorAll("[data-node-id]").forEach((card) => card.addEventListener("click", () => {
       location.hash = `node/${card.dataset.nodeId}`;
     }));
@@ -146,15 +155,16 @@
 
   function renderDetail(detail, history) {
     const node = detail.node;
-    const alias = node.display_name && node.display_name !== node.hostname && node.display_name !== node.primary_ip
-      ? `<span>${escapeHTML(node.display_name)}</span>` : "";
+    const alias = node.display_name && node.hostname !== "pending-registration" && node.hostname !== node.display_name && node.hostname !== node.primary_ip
+      ? `<span>${escapeHTML(node.hostname)}</span>` : "";
+    const lastReport = node.status === "pending" ? "等待首次上报" : `最近上报 ${formatTime(node.last_seen_at, true)}`;
     const rangeButtons = ranges.map((range) => `<button class="range-button ${range === selectedRange ? "active" : ""}" type="button" data-range="${range}">${range}</button>`).join("");
     app.innerHTML = `<div class="detail-head">
       <button class="back-button" type="button" title="返回节点列表" aria-label="返回节点列表">←</button>
       <div class="detail-title"><h1>${escapeHTML(displayName(node))}</h1><div class="detail-meta">
         <span class="status-label"><i class="status-dot ${escapeHTML(node.status)}"></i>${escapeHTML(statusText(node.status))}</span>
         <code>${escapeHTML(node.primary_ip || "未获取 IP")}</code>${alias}
-        <span>最近上报 ${formatTime(node.last_seen_at, true)}</span>
+        <span>${lastReport}</span>
       </div></div>
     </div>
     <div class="metric-strip">
@@ -323,6 +333,105 @@
     if (back) back.addEventListener("click", () => { location.hash = ""; });
   }
 
+  function shellQuote(value) {
+    return `'${String(value).replace(/'/g, `'\\''`)}'`;
+  }
+
+  function buildInstallCommand(credentials, environment, version) {
+    const origin = location.origin;
+    const variables = [
+      `SERVER_STATUS_URL=${shellQuote(origin)}`,
+      `SERVER_STATUS_AGENT_ID=${shellQuote(credentials.agent_id)}`,
+      `SERVER_STATUS_TOKEN=${shellQuote(credentials.token)}`
+    ];
+    if (environment) variables.push(`SERVER_STATUS_AGENT_ENVIRONMENT=${shellQuote(environment)}`);
+    if (version) variables.push(`SERVER_STATUS_AGENT_VERSION=${shellQuote(version)}`);
+    return `curl -fsSL ${shellQuote(`${origin}/install-agent.sh`)} | sudo env ${variables.join(" ")} sh`;
+  }
+
+  function resetAddNodeDialog() {
+    addNodeForm.reset();
+    document.getElementById("node-environment").value = "production";
+    addNodeForm.hidden = false;
+    installCommandResult.hidden = true;
+    installCommand.textContent = "";
+    addNodeError.hidden = true;
+    addNodeError.textContent = "";
+    createNodeButton.disabled = false;
+    createNodeButton.textContent = "创建节点";
+    copyInstallCommand.textContent = "复制命令";
+  }
+
+  function closeAddNodeDialog() {
+    addNodeDialog.close();
+  }
+
+  async function registerNode(event) {
+    event.preventDefault();
+    if (!addNodeForm.reportValidity()) return;
+
+    const adminToken = document.getElementById("admin-token").value.trim();
+    const displayNameValue = document.getElementById("node-display-name").value.trim();
+    const environment = document.getElementById("node-environment").value.trim();
+    const version = document.getElementById("agent-version").value.trim();
+    if (!adminToken || !displayNameValue) {
+      addNodeError.textContent = "Admin Token 和显示名称不能为空";
+      addNodeError.hidden = false;
+      return;
+    }
+    const payload = { display_name: displayNameValue };
+    if (environment) payload.labels = { environment };
+
+    addNodeError.hidden = true;
+    createNodeButton.disabled = true;
+    createNodeButton.textContent = "正在创建";
+    try {
+      const response = await fetch("/api/v1/admin/nodes", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${adminToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        let message = `创建失败 (${response.status})`;
+        try { message = (await response.json()).error || message; } catch (_) { /* response is not JSON */ }
+        throw new Error(message);
+      }
+      const credentials = await response.json();
+      document.getElementById("admin-token").value = "";
+      installCommand.textContent = buildInstallCommand(credentials, environment, version);
+      addNodeForm.hidden = true;
+      installCommandResult.hidden = false;
+      await loadNodes(true);
+    } catch (error) {
+      addNodeError.textContent = error.message;
+      addNodeError.hidden = false;
+    } finally {
+      createNodeButton.disabled = false;
+      createNodeButton.textContent = "创建节点";
+    }
+  }
+
+  async function copyCommand() {
+    const command = installCommand.textContent;
+    try {
+      await navigator.clipboard.writeText(command);
+    } catch (_) {
+      const textarea = document.createElement("textarea");
+      textarea.value = command;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+    copyInstallCommand.textContent = "已复制";
+  }
+
   function route() {
     clearInterval(refreshTimer);
     const match = location.hash.match(/^#node\/([0-9a-f-]+)$/i);
@@ -339,6 +448,16 @@
     const match = location.hash.match(/^#node\/([0-9a-f-]+)$/i);
     if (match) loadDetail(match[1]); else loadNodes(false);
   });
+  addNodeButton.addEventListener("click", () => {
+    resetAddNodeDialog();
+    addNodeDialog.showModal();
+    document.getElementById("admin-token").focus();
+  });
+  document.getElementById("close-node-dialog").addEventListener("click", closeAddNodeDialog);
+  addNodeDialog.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", closeAddNodeDialog));
+  addNodeDialog.addEventListener("close", resetAddNodeDialog);
+  addNodeForm.addEventListener("submit", registerNode);
+  copyInstallCommand.addEventListener("click", copyCommand);
   window.addEventListener("hashchange", route);
   window.addEventListener("resize", () => {
     if (!currentDetail) return;

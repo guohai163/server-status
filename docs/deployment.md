@@ -7,6 +7,7 @@
 - 容器：`server-status-central`
 - HTTP：`http://10.12.54.200:8080`
 - 配置：`/home/gydev/server-status-central/.env`，权限 `0600`
+- 镜像：`ghcr.io/guohai163/server-status-central:0.4.0`
 - 重启策略：Docker `unless-stopped`
 - 容器安全：非 root 用户、只读根文件系统、移除全部 Linux capabilities
 
@@ -17,11 +18,24 @@ ssh gydev@10.12.54.200 'docker ps --filter name=server-status-central'
 curl http://10.12.54.200:8080/readyz
 ```
 
+`scripts/deploy-central.sh` 会上传 `compose.yaml` 与 `.env`，在中心机执行 `docker compose pull` 后重建容器，不再上传源码或在中心机编译镜像。
+
 浏览器访问 `http://10.12.54.200:8080/` 即可打开无需鉴权的节点看板。公开范围只包括状态展示接口；节点上报和节点注册仍需要各自的 Bearer Token。
 
 数据库使用专用登录角色 `server_status_app`，该角色只继承 `server_status_writer`，没有超级用户、建库或建角色权限。
 
 ## 节点 Agent
+
+新节点的推荐接入方式是在中心看板点击“添加节点”，填写显示名称与环境后，在目标 Linux 节点执行生成的命令。安装器从 GitHub Release 下载 `amd64` 或 `arm64` 静态二进制并校验 SHA-256，随后以 root 安装到：
+
+- 二进制：`/opt/server-agent/server-status-agent`
+- 配置：`/opt/server-agent/agent.env`，权限 `0600`
+- 日志：`/var/log/server-status-agent.log`
+- 守护方式：root crontab 的 `@reboot` 启动和每 5 分钟存活检查
+
+目标节点只需要 Linux、`sudo`、`curl`、`crontab` 与 `sha256sum`，不需要 Go、make、Python、仓库副本或 SSH 服务。当前列出的长期验证节点仍保留旧版用户目录部署，重新执行中心生成的新安装命令后才会迁移到 `/opt/server-agent`。
+
+### 当前旧版节点
 
 - SSH：`gydev@10.12.54.169`
 - 二进制：`/home/gydev/.local/lib/server-status-agent/server-status-agent`
@@ -67,19 +81,15 @@ curl http://10.12.54.200:8080/api/v1/nodes
 SERVER_STATUS_CENTRAL_ENV_FILE=/secure/central.env scripts/deploy-central.sh
 ```
 
-节点默认只需执行一个脚本，脚本会自动注册、生成配置、轮换 Token、上传并验证首条上报：
+新节点和后续版本更新默认使用中心看板生成的安装命令。留空 Agent 版本时安装最新稳定 Release；填写语义版本时固定下载对应 Release。重复执行同一条命令会原子替换二进制、刷新配置与守护记录并验证首条上报。
+
+兼容的旧版远程部署仍可从仓库执行；它需要本机 Go、make、Python、SSH/SCP 及免交互登录权限：
 
 ```bash
 ./scripts/deploy-agent.sh
 ```
 
-只有需要跳过自动注册时才传入已有配置：
-
-```bash
-SERVER_STATUS_AGENT_ENV_FILE=/secure/agent.env ./scripts/deploy-agent.sh
-```
-
-部署脚本不会在仓库保存数据库密码、管理员 Token 或节点 Token。Agent 更新采用上传临时文件后原子替换，避免覆盖运行中二进制时出现 `Text file busy`。
+安装流程不会在仓库保存数据库密码、Admin Token 或 Node Token。Agent 更新采用临时文件后原子替换，避免覆盖运行中二进制时出现 `Text file busy`。
 
 ## 发布产物
 
