@@ -10,8 +10,13 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags 
 
 FROM alpine:3.22
 LABEL org.opencontainers.image.source="https://github.com/guohai163/server-status"
-RUN apk add --no-cache ca-certificates tzdata && addgroup -S app && adduser -S -G app app
-ENV TZ=UTC
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -S app \
+    && adduser -S -G app app \
+    && mkdir -p /var/cache/server-status \
+    && chown app:app /var/cache/server-status
+ENV TZ=UTC \
+    SERVER_STATUS_RELEASE_CACHE_DIR=/tmp/server-status-release-cache
 COPY --from=build /out/server-status-server /usr/local/bin/server-status-server
 USER app
 EXPOSE 8080

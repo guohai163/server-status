@@ -21,6 +21,7 @@ type API struct {
 	store       dataStore
 	logger      *slog.Logger
 	adminDigest [32]byte
+	releases    *releaseCache
 	mux         *http.ServeMux
 }
 
@@ -34,11 +35,12 @@ type dataStore interface {
 	GetNodeHistory(context.Context, string, string) (store.NodeHistory, error)
 }
 
-func NewAPI(database dataStore, adminToken string, logger *slog.Logger) *API {
+func NewAPI(database dataStore, adminToken string, logger *slog.Logger, releaseCacheDir string) *API {
 	api := &API{
 		store:       database,
 		logger:      logger,
 		adminDigest: sha256.Sum256([]byte(adminToken)),
+		releases:    newReleaseCache(releaseCacheDir, logger),
 		mux:         http.NewServeMux(),
 	}
 	api.mux.HandleFunc("GET /healthz", api.health)
@@ -50,6 +52,7 @@ func NewAPI(database dataStore, adminToken string, logger *slog.Logger) *API {
 	api.mux.HandleFunc("POST /api/v1/admin/nodes", api.requireAdmin(api.registerNode))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes", api.requireAdmin(api.listNodes))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes/{nodeID}", api.requireAdmin(api.getNode))
+	api.mux.HandleFunc("GET /agent/releases/{version}/{asset}", api.releaseAsset)
 	api.registerWebRoutes()
 	return api
 }
@@ -239,6 +242,10 @@ func (api *API) securityHeaders(next http.Handler) http.Handler {
 type statusWriter struct {
 	http.ResponseWriter
 	status int
+}
+
+func (writer *statusWriter) Unwrap() http.ResponseWriter {
+	return writer.ResponseWriter
 }
 
 func (writer *statusWriter) WriteHeader(status int) {

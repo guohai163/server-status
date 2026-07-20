@@ -150,7 +150,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V003__disk_io_metrics.sql
 SERVER_STATUS_DATABASE_URL=postgres://server_status_app:password@postgres:5432/server_status_db?sslmode=disable
 SERVER_STATUS_ADMIN_TOKEN=至少32位随机字符串
 SERVER_STATUS_LISTEN_ADDR=:8080
-SERVER_STATUS_CENTRAL_IMAGE=ghcr.io/guohai163/server-status-central:0.4.2
+SERVER_STATUS_CENTRAL_IMAGE=ghcr.io/guohai163/server-status-central:0.4.3
 ```
 
 Admin Token 只用于节点注册、令牌轮换和管理员查询。
@@ -169,7 +169,7 @@ docker compose up -d --remove-orphans
 curl http://127.0.0.1:8080/readyz
 ```
 
-中心容器使用非 root 用户、只读根文件系统、移除全部 capabilities，并配置 `unless-stopped` 自动恢复。
+中心容器使用非 root 用户、只读根文件系统、移除全部 capabilities，并配置 `unless-stopped` 自动恢复。Compose 会挂载独立的 `agent_release_cache` 持久卷，用于缓存 Agent Release 资产。
 
 部署完成后直接访问 `http://中心节点地址:8080/`。Web 看板不需要登录：首屏以卡片显示所有节点的机器名、IP、CPU、内存、磁盘使用率和磁盘读写速率；点击卡片进入硬件、文件系统、网卡和历史趋势详情。节点上报和管理接口仍分别使用 Node Token 与 Admin Token。
 
@@ -192,7 +192,7 @@ curl -fsSL 'https://中心节点/install-agent.sh' | sudo env \
   sh
 ```
 
-安装器直接从 `guohai163/server-status` 的 GitHub Release 下载匹配架构的静态二进制和 `checksums.txt`，校验 SHA-256 后原子安装。默认路径：
+安装器从中心节点的 Release 缓存接口下载匹配架构的静态二进制和 `checksums.txt`，目标节点不需要访问 GitHub。中心首次请求某个资产时从 `guohai163/server-status` 的 GitHub Release 下载并校验 SHA-256，后续直接使用持久缓存；`latest` 缓存每 10 分钟允许刷新，固定版本长期复用。Agent 仍会在安装前再次校验 SHA-256，然后原子安装。默认路径：
 
 | 内容 | 路径 |
 | --- | --- |
@@ -213,6 +213,7 @@ curl -fsSL 'https://中心节点/install-agent.sh' | sudo env \
 | `GET` | `/readyz` | 无 | 检查数据库和迁移就绪 |
 | `GET` | `/` | 无 | Web 节点状态看板 |
 | `GET` | `/install-agent.sh` | 无 | 获取无凭据的 Agent 安装器 |
+| `GET` | `/agent/releases/{version}/{asset}` | 无 | 获取中心校验并缓存的 Agent Release 资产 |
 | `GET` | `/api/v1/nodes` | 无 | 查询所有节点最新卡片数据 |
 | `GET` | `/api/v1/nodes/{node_id}` | 无 | 查询节点完整硬件与运行状态 |
 | `GET` | `/api/v1/nodes/{node_id}/history?range=24h` | 无 | 查询 `1h/6h/24h/7d/30d/90d` 历史趋势 |

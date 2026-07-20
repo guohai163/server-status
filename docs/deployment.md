@@ -7,9 +7,10 @@
 - 容器：`server-status-central`
 - HTTP：`http://10.12.54.200:8080`
 - 配置：`/home/gydev/server-status-central/.env`，权限 `0600`
-- 镜像：`ghcr.io/guohai163/server-status-central:0.4.2`
+- 镜像：`ghcr.io/guohai163/server-status-central:0.4.3`
 - 重启策略：Docker `unless-stopped`
 - 容器安全：非 root 用户、只读根文件系统、移除全部 Linux capabilities
+- Agent Release 缓存：Compose 持久卷 `agent_release_cache`，容器内路径 `/var/cache/server-status`
 
 检查：
 
@@ -26,7 +27,7 @@ curl http://10.12.54.200:8080/readyz
 
 ## 节点 Agent
 
-新节点的推荐接入方式是在中心看板点击“添加节点”，填写显示名称与环境后，在目标 Linux 节点执行生成的命令。安装器从 GitHub Release 下载 `amd64` 或 `arm64` 静态二进制并校验 SHA-256，随后以 root 安装到：
+新节点的推荐接入方式是在中心看板点击“添加节点”，填写显示名称与环境后，在目标 Linux 节点执行生成的命令。安装器只访问中心节点，由中心按需从 GitHub Release 下载、校验并持久缓存 `amd64` 或 `arm64` 静态二进制；因此目标节点无需访问 GitHub。安装器会再次校验 SHA-256，随后以 root 安装到：
 
 - 二进制：`/opt/server-agent/server-status-agent`
 - 配置：`/opt/server-agent/agent.env`，权限 `0600`

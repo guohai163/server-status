@@ -166,13 +166,16 @@ func TestAgentInstallerIsServedWithoutCaching(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"x86_64|amd64", "aarch64|arm64",
-		"releases/latest/download", "releases/download/v$version",
+		"/agent/releases/latest", "/agent/releases/v$version",
 		"server-status-agent-linux-$architecture", "checksums.txt",
-		"/opt/server-agent", "# server-status-agent-managed",
+		"central release cache", "/opt/server-agent", "# server-status-agent-managed",
 	} {
 		if !bytes.Contains(response.Body.Bytes(), []byte(expected)) {
 			t.Fatalf("installer response does not contain %q", expected)
 		}
+	}
+	if bytes.Contains(response.Body.Bytes(), []byte("github.com")) {
+		t.Fatal("installer must not require target nodes to access GitHub")
 	}
 }
 
@@ -193,7 +196,7 @@ func testAPI() (*API, *fakeStore) {
 		AgentID: "20000000-0000-4000-8000-000000000001",
 	}}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewAPI(database, testAdminToken, logger), database
+	return NewAPI(database, testAdminToken, logger, ""), database
 }
 
 func validHTTPTestReport(t *testing.T) report.Report {

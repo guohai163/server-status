@@ -1,12 +1,16 @@
 services:
   central:
-    image: ${SERVER_STATUS_CENTRAL_IMAGE:-ghcr.io/guohai163/server-status-central:0.4.2}
+    image: ${SERVER_STATUS_CENTRAL_IMAGE:-ghcr.io/guohai163/server-status-central:0.4.3}
     container_name: server-status-central
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      SERVER_STATUS_RELEASE_CACHE_DIR: /var/cache/server-status
     ports:
       - "8080:8080"
+    volumes:
+      - agent_release_cache:/var/cache/server-status
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
@@ -20,3 +24,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+volumes:
+  agent_release_cache:

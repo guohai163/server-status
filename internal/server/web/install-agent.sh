@@ -1,7 +1,6 @@
 #!/bin/sh
 set -eu
 
-REPOSITORY="guohai163/server-status"
 INSTALL_DIR="/opt/server-agent"
 BINARY="$INSTALL_DIR/server-status-agent"
 RUNNER="$INSTALL_DIR/run-agent.sh"
@@ -51,9 +50,9 @@ if [ -n "$SERVER_STATUS_AGENT_VERSION" ]; then
   if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
     fail "SERVER_STATUS_AGENT_VERSION must be a semantic version"
   fi
-  release_base="https://github.com/$REPOSITORY/releases/download/v$version"
+  release_base="${SERVER_STATUS_URL%/}/agent/releases/v$version"
 else
-  release_base="https://github.com/$REPOSITORY/releases/latest/download"
+  release_base="${SERVER_STATUS_URL%/}/agent/releases/latest"
 fi
 
 asset="server-status-agent-linux-$architecture"
@@ -64,10 +63,10 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
-echo "Downloading $asset from GitHub Releases"
-curl -fsSL --connect-timeout 15 --max-time 180 "$release_base/$asset" \
+echo "Downloading $asset through the central release cache"
+curl -fsSL --connect-timeout 15 --max-time 300 "$release_base/$asset" \
   -o "$temporary_directory/$asset"
-curl -fsSL --connect-timeout 15 --max-time 60 "$release_base/checksums.txt" \
+curl -fsSL --connect-timeout 15 --max-time 300 "$release_base/checksums.txt" \
   -o "$temporary_directory/checksums.txt"
 
 expected_checksum=$(awk -v asset="$asset" '$2 == asset { print $1; exit }' "$temporary_directory/checksums.txt")
