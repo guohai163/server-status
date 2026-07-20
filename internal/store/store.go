@@ -21,6 +21,8 @@ var (
 	ErrInvalidResource = errors.New("metric references an inactive inventory resource")
 )
 
+const machineTypeLabelKey = "server_status.machine_type"
+
 type Store struct {
 	pool *pgxpool.Pool
 }

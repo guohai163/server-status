@@ -52,6 +52,17 @@ func TestAddressScope(t *testing.T) {
 	}
 }
 
+func TestClassifyMachineType(t *testing.T) {
+	if got := classifyMachineType("guest"); got != "virtual" {
+		t.Fatalf("guest classified as %q", got)
+	}
+	for _, role := range []string{"host", ""} {
+		if got := classifyMachineType(role); got != "physical" {
+			t.Fatalf("role %q classified as %q", role, got)
+		}
+	}
+}
+
 func TestBlockDeviceKind(t *testing.T) {
 	if blockDeviceKind("md0") != "raid" || blockDeviceKind("dm-0") != "virtual" || blockDeviceKind("nvme0n1") != "disk" {
 		t.Fatal("block device kind classification is incorrect")

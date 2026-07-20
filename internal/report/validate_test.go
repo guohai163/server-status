@@ -69,6 +69,15 @@ func TestReportValidationRejectsDiskCounterOutsideBigint(t *testing.T) {
 	}
 }
 
+func TestReportValidationRejectsInvalidMachineType(t *testing.T) {
+	now := time.Now().UTC()
+	payload := validTestReport(t, now)
+	payload.Agent.MachineType = "bare-metal"
+	if err := payload.Validate(now); err == nil {
+		t.Fatal("invalid machine type was accepted")
+	}
+}
+
 func validTestReport(t *testing.T, now time.Time) Report {
 	t.Helper()
 	inventory := Inventory{

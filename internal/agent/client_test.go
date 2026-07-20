@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -18,11 +19,12 @@ func TestClientRetriesServerErrors(t *testing.T) {
 			return
 		}
 		response.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(response).Encode(report.ReportReceipt{Status: "accepted"})
 	}))
 	defer server.Close()
 
 	client := NewClient(server.URL, "token")
-	if err := client.Send(context.Background(), report.Report{}); err != nil {
+	if _, err := client.Send(context.Background(), report.Report{}); err != nil {
 		t.Fatalf("retryable request failed: %v", err)
 	}
 	if attempts.Load() != 3 {
@@ -39,10 +41,30 @@ func TestClientDoesNotRetryAuthenticationErrors(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "bad-token")
-	if err := client.Send(context.Background(), report.Report{}); err == nil {
+	if _, err := client.Send(context.Background(), report.Report{}); err == nil {
 		t.Fatal("authentication error was accepted")
 	}
 	if attempts.Load() != 1 {
 		t.Fatalf("authentication error was retried %d times", attempts.Load())
+	}
+}
+
+func TestClientReadsAgentUpdateDirective(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(response).Encode(report.ReportReceipt{
+			Status:      "accepted",
+			AgentUpdate: &report.AgentUpdate{Version: "1.2.3"},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token")
+	receipt, err := client.Send(context.Background(), report.Report{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.AgentUpdate == nil || receipt.AgentUpdate.Version != "1.2.3" {
+		t.Fatalf("unexpected update directive: %+v", receipt.AgentUpdate)
 	}
 }

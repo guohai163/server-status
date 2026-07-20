@@ -41,7 +41,7 @@ func main() {
 	}
 	serverErrors := make(chan error, 1)
 	go func() {
-		logger.Info("central server started", "address", config.ListenAddress)
+		logger.Info("central server started", "address", config.ListenAddress, "latest_agent_version", appserver.Version)
 		serverErrors <- httpServer.ListenAndServe()
 	}()
 	go appserver.RunMaintenance(ctx, database, logger)

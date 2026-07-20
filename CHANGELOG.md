@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.0 - 2026-07-20
+
+### Added
+- Let released central servers direct older Agents to download, verify, atomically install, and restart into the matching Release version without changing their Agent ID, Node Token, labels, or collection settings.
+- Detect physical and virtual machines, expose CPU package thread topology, and mark physical servers in the dashboard with per-package thread counts.
+- Group dashboard cards by IPv4 `/24` subnet and sort groups and nodes numerically by address.
+- Follow the operating system light or dark color scheme across dashboard cards, controls, dialogs, tables, and history charts.
+
+### Changed
+- Embed the Release tag in central container images so update decisions use the exact published Agent version.
+
 ## v0.4.4 - 2026-07-20
 
 ### Added

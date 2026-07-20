@@ -125,6 +125,7 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 			KernelVersion: hostInfo.KernelVersion,
 			Architecture:  runtime.GOARCH,
 			AgentVersion:  Version,
+			MachineType:   classifyMachineType(hostInfo.VirtualizationRole),
 			Labels:        config.Labels,
 		},
 		Inventory: report.Inventory{
@@ -162,6 +163,13 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 		return report.Report{}, fmt.Errorf("fingerprint inventory: %w", err)
 	}
 	return payload, nil
+}
+
+func classifyMachineType(virtualizationRole string) string {
+	if strings.EqualFold(strings.TrimSpace(virtualizationRole), "guest") {
+		return "virtual"
+	}
+	return "physical"
 }
 
 func (collector *Collector) collectDisk(ctx context.Context, devices []report.BlockDevice) (report.DiskMetrics, error) {

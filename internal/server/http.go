@@ -15,14 +15,16 @@ import (
 
 	"github.com/guohai/server-status/internal/report"
 	"github.com/guohai/server-status/internal/store"
+	appversion "github.com/guohai/server-status/internal/version"
 )
 
 type API struct {
-	store       dataStore
-	logger      *slog.Logger
-	adminDigest [32]byte
-	releases    *releaseCache
-	mux         *http.ServeMux
+	store              dataStore
+	logger             *slog.Logger
+	adminDigest        [32]byte
+	releases           *releaseCache
+	latestAgentVersion string
+	mux                *http.ServeMux
 }
 
 type dataStore interface {
@@ -36,12 +38,14 @@ type dataStore interface {
 }
 
 func NewAPI(database dataStore, adminToken string, logger *slog.Logger, releaseCacheDir string) *API {
+	latestAgentVersion, _ := appversion.Normalize(Version)
 	api := &API{
-		store:       database,
-		logger:      logger,
-		adminDigest: sha256.Sum256([]byte(adminToken)),
-		releases:    newReleaseCache(releaseCacheDir, logger),
-		mux:         http.NewServeMux(),
+		store:              database,
+		logger:             logger,
+		adminDigest:        sha256.Sum256([]byte(adminToken)),
+		releases:           newReleaseCache(releaseCacheDir, logger),
+		latestAgentVersion: latestAgentVersion,
+		mux:                http.NewServeMux(),
 	}
 	api.mux.HandleFunc("GET /healthz", api.health)
 	api.mux.HandleFunc("GET /readyz", api.ready)
@@ -116,10 +120,14 @@ func (api *API) report(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusInternalServerError, "report ingestion failed")
 		return
 	}
-	writeJSON(response, http.StatusAccepted, map[string]any{
-		"status":    "accepted",
-		"bucket_at": payload.CollectedAt.UTC().Truncate(time.Minute),
-	})
+	receipt := report.ReportReceipt{
+		Status:   "accepted",
+		BucketAt: payload.CollectedAt.UTC().Truncate(time.Minute),
+	}
+	if comparison, ok := appversion.Compare(payload.Agent.AgentVersion, api.latestAgentVersion); ok && comparison < 0 {
+		receipt.AgentUpdate = &report.AgentUpdate{Version: api.latestAgentVersion}
+	}
+	writeJSON(response, http.StatusAccepted, receipt)
 }
 
 func (api *API) registerNode(response http.ResponseWriter, request *http.Request) {

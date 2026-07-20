@@ -14,6 +14,16 @@ type Report struct {
 	Metrics              Metrics   `json:"metrics"`
 }
 
+type ReportReceipt struct {
+	Status      string       `json:"status"`
+	BucketAt    time.Time    `json:"bucket_at"`
+	AgentUpdate *AgentUpdate `json:"agent_update,omitempty"`
+}
+
+type AgentUpdate struct {
+	Version string `json:"version"`
+}
+
 type AgentInfo struct {
 	ID            string            `json:"id"`
 	Hostname      string            `json:"hostname"`
@@ -22,6 +32,7 @@ type AgentInfo struct {
 	KernelVersion string            `json:"kernel_version,omitempty"`
 	Architecture  string            `json:"architecture"`
 	AgentVersion  string            `json:"agent_version"`
+	MachineType   string            `json:"machine_type,omitempty"`
 	Labels        map[string]string `json:"labels,omitempty"`
 }
 

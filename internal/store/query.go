@@ -20,6 +20,7 @@ type NodeSummary struct {
 	Architecture          string            `json:"architecture"`
 	AgentVersion          string            `json:"agent_version"`
 	Labels                map[string]string `json:"labels"`
+	MachineType           string            `json:"machine_type,omitempty"`
 	LastSeenAt            time.Time         `json:"last_seen_at"`
 	Status                string            `json:"status"`
 	PrimaryIP             string            `json:"primary_ip,omitempty"`
@@ -36,6 +37,7 @@ type NodeSummary struct {
 	CPUPackageCount       int               `json:"cpu_package_count"`
 	CPUPhysicalCoreCount  int               `json:"cpu_physical_core_count"`
 	CPULogicalThreadCount int               `json:"cpu_logical_thread_count"`
+	CPUThreadsPerPackage  []int64           `json:"cpu_threads_per_package"`
 	CPUModels             []string          `json:"cpu_models"`
 	MemoryModuleCount     int               `json:"memory_module_count"`
 	InventoryMemoryBytes  int64             `json:"inventory_memory_bytes"`
@@ -201,6 +203,7 @@ const nodeSummarySQL = `
 		status.architecture,
 		status.agent_version,
 		status.labels,
+		COALESCE(status.labels->>'server_status.machine_type', ''),
 		status.last_seen_at,
 		status.status,
 		COALESCE(primary_address.address, ''),
@@ -217,6 +220,7 @@ const nodeSummarySQL = `
 		hardware.cpu_package_count,
 		hardware.cpu_physical_core_count,
 		hardware.cpu_logical_thread_count,
+		COALESCE(cpu_detail.threads_per_package, ARRAY[]::bigint[]),
 		COALESCE(hardware.cpu_models, ARRAY[]::text[]),
 		hardware.memory_module_count,
 		hardware.memory_total_bytes,
@@ -231,6 +235,11 @@ const nodeSummarySQL = `
 		COALESCE(network_usage.tx_bytes_per_second, 0)::double precision
 	  FROM monitoring.v_node_status status
 	  JOIN monitoring.v_node_hardware_summary hardware ON hardware.node_id = status.node_id
+	  LEFT JOIN LATERAL (
+		SELECT array_agg(cpu.logical_threads::bigint ORDER BY cpu.package_index, cpu.id) AS threads_per_package
+		  FROM monitoring.cpu_packages cpu
+		 WHERE cpu.node_id = status.node_id AND cpu.removed_at IS NULL
+	  ) cpu_detail ON true
 	  LEFT JOIN monitoring.node_current_metrics current_metric ON current_metric.node_id = status.node_id
 	  LEFT JOIN LATERAL (
 		SELECT host(address)::text AS address
@@ -268,10 +277,12 @@ func scanNodeSummary(row scanner) (NodeSummary, error) {
 	err := row.Scan(
 		&item.NodeID, &item.AgentID, &item.Hostname, &item.DisplayName,
 		&item.OSName, &item.OSVersion, &item.Architecture, &item.AgentVersion,
-		&labelsJSON, &item.LastSeenAt, &item.Status, &item.PrimaryIP, &item.SecondsSinceLastSeen,
+		&labelsJSON, &item.MachineType,
+		&item.LastSeenAt, &item.Status, &item.PrimaryIP, &item.SecondsSinceLastSeen,
 		&item.LatestBucketAt, &item.CPUUsagePercent, &item.Load1, &item.Load5, &item.Load15,
 		&item.MemoryTotalBytes, &item.MemoryUsedBytes, &item.MemoryUsagePercent, &item.UptimeSeconds,
-		&item.CPUPackageCount, &item.CPUPhysicalCoreCount, &item.CPULogicalThreadCount, &item.CPUModels,
+		&item.CPUPackageCount, &item.CPUPhysicalCoreCount, &item.CPULogicalThreadCount,
+		&item.CPUThreadsPerPackage, &item.CPUModels,
 		&item.MemoryModuleCount, &item.InventoryMemoryBytes, &item.MemoryModels,
 		&item.DiskCount, &item.DiskTotalBytes, &item.DiskModels,
 		&item.DiskUsagePercent, &item.DiskReadBytesPerSec, &item.DiskWriteBytesPerSec,

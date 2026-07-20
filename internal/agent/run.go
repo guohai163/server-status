@@ -24,6 +24,7 @@ func AcquireLock(path string) (*os.File, error) {
 func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 	collector := NewCollector()
 	client := NewClient(config.ServerURL, config.Token)
+	updater := NewUpdater(config.ServerURL, Version)
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
@@ -35,10 +36,19 @@ func Run(ctx context.Context, config Config, logger *slog.Logger) error {
 			payload, err := collector.Collect(ctx, config)
 			if err != nil {
 				logger.Error("collection failed", "error", err)
-			} else if err := client.Send(ctx, payload); err != nil {
+			} else if receipt, err := client.Send(ctx, payload); err != nil {
 				logger.Error("report failed", "error", err, "collected_at", payload.CollectedAt)
 			} else {
 				logger.Info("report accepted", "collected_at", payload.CollectedAt, "duration", time.Since(started))
+				if receipt.AgentUpdate != nil {
+					logger.Info("Agent update requested", "current_version", Version, "target_version", receipt.AgentUpdate.Version)
+					if err := updater.Apply(ctx, receipt.AgentUpdate.Version); err != nil {
+						logger.Error("Agent update failed", "target_version", receipt.AgentUpdate.Version, "error", err)
+					} else {
+						logger.Info("Agent update installed; restarting", "target_version", receipt.AgentUpdate.Version)
+						return ErrUpdateApplied
+					}
+				}
 			}
 			nextDelay := config.Interval - time.Since(started)
 			if nextDelay < 0 {

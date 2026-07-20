@@ -203,6 +203,8 @@ curl -fsSL 'https://中心节点/install-agent.sh' | sudo env \
 
 安装器会保留现有无关 crontab，幂等写入 `@reboot` 启动项和每 5 分钟存活检查，立即启动 Agent，并等待中心接受第一条报告。Node Token 会出现在生成命令和目标机 shell 历史中，但仅具备该节点的上报权限；生产环境应使用 HTTPS。
 
+正式发布的中心镜像内嵌同版本 Agent 的最新版本号。支持自更新的 Agent 上报时，如果自身语义版本低于中心版本，会从中心下载该固定版本，校验 SHA-256 和二进制版本后原子替换自身并重启。自动更新只替换二进制，不修改 `agent.env`，因此原 Agent ID、Node Token 和标签保持不变，也不会自动降级。旧 Agent 需要先手动升级一次到支持自更新的版本。
+
 原有 `scripts/deploy-agent.sh` 继续作为兼容的远程部署方式。只有该旧流程需要开发机安装 Go 1.25、`make`、`python3`、`ssh` 和 `scp`，并配置到中心机和 Agent 节点的免交互 SSH。
 
 ## API
@@ -217,7 +219,7 @@ curl -fsSL 'https://中心节点/install-agent.sh' | sudo env \
 | `GET` | `/api/v1/nodes` | 无 | 查询所有节点最新卡片数据 |
 | `GET` | `/api/v1/nodes/{node_id}` | 无 | 查询节点完整硬件与运行状态 |
 | `GET` | `/api/v1/nodes/{node_id}/history?range=24h` | 无 | 查询 `1h/6h/24h/7d/30d/90d` 历史趋势 |
-| `POST` | `/api/v1/reports` | Node Token | 接收一分钟快照 |
+| `POST` | `/api/v1/reports` | Node Token | 接收一分钟快照，并在需要时返回固定版本 Agent 更新指令 |
 | `POST` | `/api/v1/admin/nodes` | Admin Token | 注册节点或轮换节点 Token |
 | `GET` | `/api/v1/admin/nodes` | Admin Token | 查询节点状态列表 |
 | `GET` | `/api/v1/admin/nodes/{node_id}` | Admin Token | 查询节点、文件系统和网卡详情 |

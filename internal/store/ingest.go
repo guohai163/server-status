@@ -13,7 +13,14 @@ import (
 func (store *Store) Ingest(ctx context.Context, auth NodeAuth, payload report.Report) error {
 	receivedAt := time.Now().UTC()
 	bucketAt := payload.CollectedAt.UTC().Truncate(time.Minute)
-	labels, err := json.Marshal(payload.Agent.Labels)
+	agentLabels := make(map[string]string, len(payload.Agent.Labels)+1)
+	for key, value := range payload.Agent.Labels {
+		agentLabels[key] = value
+	}
+	if payload.Agent.MachineType != "" {
+		agentLabels[machineTypeLabelKey] = payload.Agent.MachineType
+	}
+	labels, err := json.Marshal(agentLabels)
 	if err != nil {
 		return fmt.Errorf("encode agent labels: %w", err)
 	}

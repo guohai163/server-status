@@ -20,10 +20,14 @@
   let refreshTimer = null;
   let resizeFrame = null;
 
-  const colors = {
-    cpu: "#16845b", memory: "#2878b9", disk: "#b36a13",
-    read: "#2878b9", write: "#c15a3a", rx: "#16845b", tx: "#7b61a8"
+  const chartColorVariables = {
+    cpu: "--chart-cpu", memory: "--chart-memory", disk: "--chart-disk",
+    read: "--chart-read", write: "--chart-write", rx: "--chart-rx", tx: "--chart-tx"
   };
+
+  function themeColor(variable) {
+    return getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
+  }
 
   function escapeHTML(value) {
     return String(value ?? "").replace(/[&<>'"]/g, (character) => ({
@@ -65,9 +69,86 @@
   function displayName(node) { return node.display_name || node.hostname; }
   function usageClass(value) { return value >= 90 ? "danger" : value >= 75 ? "warning" : ""; }
   function statusText(status) { return ({ online: "在线", offline: "离线", pending: "待安装", disabled: "已禁用" })[status] || status; }
+  function isPhysicalNode(node) {
+    const machineType = String(node.machine_type || "").toLowerCase();
+    if (machineType) return machineType === "physical";
+    const packages = Number(node.cpu_package_count) || 0;
+    return packages > 1 && (Number(node.cpu_logical_thread_count) || 0) > packages;
+  }
+  function cpuLabel(node) {
+    const packageThreads = (node.cpu_threads_per_package || []).map(Number).filter((threads) => threads > 0);
+    const totalThreads = Number(node.cpu_logical_thread_count) || packageThreads.reduce((sum, threads) => sum + threads, 0);
+    if (!totalThreads) return "CPU";
+    const threads = isPhysicalNode(node) && packageThreads.length > 1 ? packageThreads.join("+") : totalThreads;
+    return `CPU · ${threads} 线程`;
+  }
+  function parseIPv4(value) {
+    const address = String(value || "").trim().split("/", 1)[0];
+    const parts = address.split(".");
+    if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part))) return null;
+    const octets = parts.map(Number);
+    return octets.every((octet) => octet >= 0 && octet <= 255) ? octets : null;
+  }
+  function compareOctets(left, right) {
+    for (let index = 0; index < left.length; index += 1) {
+      if (left[index] !== right[index]) return left[index] - right[index];
+    }
+    return 0;
+  }
+  function compareNodeNames(left, right) {
+    return String(displayName(left) || "").localeCompare(String(displayName(right) || ""), "zh-CN", { numeric: true });
+  }
+  function groupNodesBySubnet(items) {
+    const subnets = new Map();
+    const unassigned = [];
+    items.forEach((node) => {
+      const octets = parseIPv4(node.primary_ip);
+      if (!octets) {
+        unassigned.push(node);
+        return;
+      }
+      const subnetOctets = octets.slice(0, 3);
+      const key = subnetOctets.join(".");
+      if (!subnets.has(key)) subnets.set(key, { label: `${key}.0/24`, octets: subnetOctets, nodes: [] });
+      subnets.get(key).nodes.push(node);
+    });
+
+    const groups = Array.from(subnets.values()).sort((left, right) => compareOctets(left.octets, right.octets));
+    groups.forEach((group) => group.nodes.sort((left, right) => {
+      const addressOrder = compareOctets(parseIPv4(left.primary_ip), parseIPv4(right.primary_ip));
+      return addressOrder || compareNodeNames(left, right);
+    }));
+    if (unassigned.length) {
+      unassigned.sort(compareNodeNames);
+      groups.push({ label: "未分配 IPv4", nodes: unassigned });
+    }
+    return groups;
+  }
   function progress(label, value) {
     const percent = clamp(value, 0, 100);
     return `<div class="metric-row"><div class="metric-row-head"><span>${label}</span><strong>${formatPercent(percent)}</strong></div><div class="progress"><i class="${usageClass(percent)}" style="width:${percent}%"></i></div></div>`;
+  }
+
+  function nodeCard(node) {
+    const memoryPercent = node.memory_usage_percent || 0;
+    const addressAndOS = `${node.primary_ip || "未获取 IP"} - ${formatOS(node)}`;
+    const physicalIcon = isPhysicalNode(node) ? '<img class="physical-server-icon" src="/assets/cloud-server.svg" alt="" title="物理服务器">' : "";
+    return `<button class="node-card" type="button" data-node-id="${escapeHTML(node.node_id)}">
+      <div class="card-head">
+        <div class="card-title"><strong class="card-name">${physicalIcon}<span>${escapeHTML(displayName(node))}</span></strong><span class="card-meta">${escapeHTML(addressAndOS)}</span></div>
+        <span class="status-label"><i class="status-dot ${escapeHTML(node.status)}"></i>${escapeHTML(statusText(node.status))}</span>
+      </div>
+      <div class="metric-list">
+        ${progress(cpuLabel(node), node.cpu_usage_percent)}
+        ${progress(`内存 · ${formatBytes(node.memory_total_bytes)}`, memoryPercent)}
+        ${progress(`磁盘 · ${formatBytes(node.disk_total_bytes)}`, node.disk_usage_percent)}
+      </div>
+      <div class="io-strip">
+        <div class="io-item"><span>磁盘读取</span><strong>↓ ${formatRate(node.disk_read_bytes_per_second)}</strong></div>
+        <div class="io-item"><span>磁盘写入</span><strong>↑ ${formatRate(node.disk_write_bytes_per_second)}</strong></div>
+        <div class="io-item load-item"><span>Load Average (1/5/15)</span><strong>${formatLoad(node.load_1)} / ${formatLoad(node.load_5)} / ${formatLoad(node.load_15)}</strong></div>
+      </div>
+    </button>`;
   }
 
   async function apiFetch(path) {
@@ -106,26 +187,13 @@
       result[node.status] = (result[node.status] || 0) + 1;
       return result;
     }, {});
-    const cards = nodes.map((node) => {
-      const memoryPercent = node.memory_usage_percent || 0;
-      const addressAndOS = `${node.primary_ip || "未获取 IP"} - ${formatOS(node)}`;
-      return `<button class="node-card" type="button" data-node-id="${escapeHTML(node.node_id)}">
-        <div class="card-head">
-          <div class="card-title"><strong>${escapeHTML(displayName(node))}</strong><span>${escapeHTML(addressAndOS)}</span></div>
-          <span class="status-label"><i class="status-dot ${escapeHTML(node.status)}"></i>${escapeHTML(statusText(node.status))}</span>
-        </div>
-        <div class="metric-list">
-          ${progress("CPU", node.cpu_usage_percent)}
-          ${progress(`内存 · ${formatBytes(node.memory_total_bytes)}`, memoryPercent)}
-          ${progress(`磁盘 · ${formatBytes(node.disk_total_bytes)}`, node.disk_usage_percent)}
-        </div>
-        <div class="io-strip">
-          <div class="io-item"><span>磁盘读取</span><strong>↓ ${formatRate(node.disk_read_bytes_per_second)}</strong></div>
-          <div class="io-item"><span>磁盘写入</span><strong>↑ ${formatRate(node.disk_write_bytes_per_second)}</strong></div>
-          <div class="io-item load-item"><span>Load Average (1/5/15)</span><strong>${formatLoad(node.load_1)} / ${formatLoad(node.load_5)} / ${formatLoad(node.load_15)}</strong></div>
-        </div>
-      </button>`;
-    }).join("");
+    const groups = groupNodesBySubnet(nodes).map((group, index) => `<section class="node-group" aria-labelledby="node-group-${index}">
+      <div class="node-group-head">
+        <h2 id="node-group-${index}"><code>${escapeHTML(group.label)}</code></h2>
+        <span>${group.nodes.length} 台</span>
+      </div>
+      <div class="node-grid">${group.nodes.map(nodeCard).join("")}</div>
+    </section>`).join("");
     app.innerHTML = `<div class="page-heading">
       <div><h1>节点状态</h1><p>${nodes.length} 台服务器的最新一分钟快照</p></div>
       <div class="status-counts">
@@ -134,7 +202,7 @@
         ${counts.pending ? `<span class="status-count"><i class="status-dot pending"></i>待安装 <strong>${counts.pending}</strong></span>` : ""}
         ${counts.disabled ? `<span class="status-count"><i class="status-dot disabled"></i>禁用 <strong>${counts.disabled}</strong></span>` : ""}
       </div>
-    </div>${nodes.length ? `<div class="node-grid">${cards}</div>` : '<div class="empty-state"><strong>暂无节点</strong><span>尚未创建监控节点</span></div>'}`;
+    </div>${nodes.length ? `<div class="node-groups">${groups}</div>` : '<div class="empty-state"><strong>暂无节点</strong><span>尚未创建监控节点</span></div>'}`;
     app.querySelectorAll("[data-node-id]").forEach((card) => card.addEventListener("click", () => {
       location.hash = `node/${card.dataset.nodeId}`;
     }));
@@ -185,8 +253,8 @@
     </div>
     <section class="section"><div class="section-head"><div><h2>历史数据</h2><p>${history.resolution === "hour" ? "小时汇总" : "分钟原始指标"}</p></div><div class="segmented" aria-label="历史时间范围">${rangeButtons}</div></div>
       <div class="chart-grid">
-        ${chartPanel("resource-chart", "资源使用率", [["CPU", colors.cpu], ["内存", colors.memory], ["磁盘", colors.disk]])}
-        ${chartPanel("io-chart", "吞吐速率", [["磁盘读", colors.read], ["磁盘写", colors.write], ["网络收", colors.rx], ["网络发", colors.tx]])}
+        ${chartPanel("resource-chart", "资源使用率", [["CPU", chartColorVariables.cpu], ["内存", chartColorVariables.memory], ["磁盘", chartColorVariables.disk]])}
+        ${chartPanel("io-chart", "吞吐速率", [["磁盘读", chartColorVariables.read], ["磁盘写", chartColorVariables.write], ["网络收", chartColorVariables.rx], ["网络发", chartColorVariables.tx]])}
       </div>
     </section>
     <section class="section"><div class="section-head"><div><h2>硬件信息</h2><p>${escapeHTML(node.architecture)} · Agent ${escapeHTML(node.agent_version)}</p></div></div>
@@ -204,7 +272,7 @@
   }
 
   function chartPanel(id, title, items) {
-    const legend = items.map(([name, color]) => `<span class="legend-item" style="--color:${color}"><i></i>${name}</span>`).join("");
+    const legend = items.map(([name, color]) => `<span class="legend-item" style="--color:var(${color})"><i></i>${name}</span>`).join("");
     return `<div class="chart-panel"><h3>${title}</h3><div class="legend">${legend}</div><div class="chart-wrap"><canvas id="${id}"></canvas></div></div>`;
   }
 
@@ -223,15 +291,15 @@
   function renderCharts(points) {
     currentHistoryPoints = points;
     drawLineChart(document.getElementById("resource-chart"), points, [
-      { label: "CPU", key: "cpu_usage_percent", color: colors.cpu },
-      { label: "内存", key: "memory_usage_percent", color: colors.memory },
-      { label: "磁盘", key: "disk_usage_percent", color: colors.disk }
+      { label: "CPU", key: "cpu_usage_percent", color: themeColor(chartColorVariables.cpu) },
+      { label: "内存", key: "memory_usage_percent", color: themeColor(chartColorVariables.memory) },
+      { label: "磁盘", key: "disk_usage_percent", color: themeColor(chartColorVariables.disk) }
     ], true);
     drawLineChart(document.getElementById("io-chart"), points, [
-      { label: "磁盘读", key: "disk_read_bytes_per_second", color: colors.read },
-      { label: "磁盘写", key: "disk_write_bytes_per_second", color: colors.write },
-      { label: "网络收", key: "network_rx_bytes_per_second", color: colors.rx },
-      { label: "网络发", key: "network_tx_bytes_per_second", color: colors.tx }
+      { label: "磁盘读", key: "disk_read_bytes_per_second", color: themeColor(chartColorVariables.read) },
+      { label: "磁盘写", key: "disk_write_bytes_per_second", color: themeColor(chartColorVariables.write) },
+      { label: "网络收", key: "network_rx_bytes_per_second", color: themeColor(chartColorVariables.rx) },
+      { label: "网络发", key: "network_tx_bytes_per_second", color: themeColor(chartColorVariables.tx) }
     ], false);
   }
 
@@ -249,13 +317,16 @@
     const plotWidth = width - padding.left - padding.right;
     const plotHeight = height - padding.top - padding.bottom;
     const maxValue = percent ? 100 : Math.max(1, ...points.flatMap((point) => series.map((item) => Number(point[item.key]) || 0))) * 1.12;
+    const gridColor = themeColor("--chart-grid");
+    const labelColor = themeColor("--chart-label");
+    const hoverColor = themeColor("--chart-hover");
 
     function paint(hoverIndex) {
       context.clearRect(0, 0, width, height);
       context.font = "10px system-ui, sans-serif";
       context.textBaseline = "middle";
-      context.strokeStyle = "#e7ebee";
-      context.fillStyle = "#89949c";
+      context.strokeStyle = gridColor;
+      context.fillStyle = labelColor;
       context.lineWidth = 1;
       for (let step = 0; step <= 4; step += 1) {
         const y = padding.top + plotHeight * step / 4;
@@ -265,7 +336,7 @@
         context.textAlign = "right"; context.fillText(label, padding.left - 7, y);
       }
       if (!points.length) {
-        context.textAlign = "center"; context.fillStyle = "#89949c";
+        context.textAlign = "center"; context.fillStyle = labelColor;
         context.fillText("所选范围暂无历史数据", padding.left + plotWidth / 2, padding.top + plotHeight / 2);
         return;
       }
@@ -278,11 +349,11 @@
         });
         context.stroke();
       });
-      context.fillStyle = "#89949c"; context.textAlign = "left"; context.fillText(formatTime(points[0].bucket_at), padding.left, height - 10);
+      context.fillStyle = labelColor; context.textAlign = "left"; context.fillText(formatTime(points[0].bucket_at), padding.left, height - 10);
       context.textAlign = "right"; context.fillText(formatTime(points[points.length - 1].bucket_at), width - padding.right, height - 10);
       if (hoverIndex != null) {
         const x = padding.left + (points.length === 1 ? plotWidth / 2 : plotWidth * hoverIndex / (points.length - 1));
-        context.strokeStyle = "#7b858c"; context.lineWidth = 1; context.beginPath(); context.moveTo(x, padding.top); context.lineTo(x, padding.top + plotHeight); context.stroke();
+        context.strokeStyle = hoverColor; context.lineWidth = 1; context.beginPath(); context.moveTo(x, padding.top); context.lineTo(x, padding.top + plotHeight); context.stroke();
       }
     }
     paint(null);
@@ -472,6 +543,9 @@
     if (!currentDetail) return;
     if (resizeFrame) cancelAnimationFrame(resizeFrame);
     resizeFrame = requestAnimationFrame(() => renderCharts(currentHistoryPoints));
+  });
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (currentDetail) renderCharts(currentHistoryPoints);
   });
   route();
 })();

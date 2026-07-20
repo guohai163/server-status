@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -27,13 +28,30 @@ func main() {
 		logger.Error("cannot acquire process lock", "error", err)
 		os.Exit(1)
 	}
-	defer lock.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	logger.Info("agent started", "version", agent.Version, "interval", config.Interval, "server", config.ServerURL)
-	if err := agent.Run(ctx, config, logger); err != nil {
-		logger.Error("agent stopped with error", "error", err)
+	runError := agent.Run(ctx, config, logger)
+	if errors.Is(runError, agent.ErrUpdateApplied) {
+		if err := lock.Close(); err != nil {
+			logger.Error("close process lock for restart", "error", err)
+			os.Exit(1)
+		}
+		executable, err := os.Executable()
+		if err != nil {
+			logger.Error("locate updated Agent", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("restarting updated Agent")
+		if err := syscall.Exec(executable, os.Args, os.Environ()); err != nil {
+			logger.Error("restart updated Agent", "error", err)
+			os.Exit(1)
+		}
+	}
+	_ = lock.Close()
+	if runError != nil {
+		logger.Error("agent stopped with error", "error", runError)
 		os.Exit(1)
 	}
 	logger.Info("agent stopped")

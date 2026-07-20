@@ -83,6 +83,54 @@ func TestValidReportIsIngested(t *testing.T) {
 	}
 }
 
+func TestOlderAgentReceivesCentralReleaseUpdate(t *testing.T) {
+	api, _ := testAPI()
+	api.latestAgentVersion = "1.2.0"
+	payload := validHTTPTestReport(t)
+	payload.Agent.AgentVersion = "1.1.0"
+	body, _ := json.Marshal(payload)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/reports", bytes.NewReader(body))
+	request.Header.Set("Authorization", "Bearer node-token")
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", response.Code, response.Body.String())
+	}
+	var receipt report.ReportReceipt
+	if err := json.NewDecoder(response.Body).Decode(&receipt); err != nil {
+		t.Fatal(err)
+	}
+	if receipt.AgentUpdate == nil || receipt.AgentUpdate.Version != "1.2.0" {
+		t.Fatalf("unexpected update directive: %+v", receipt.AgentUpdate)
+	}
+}
+
+func TestCurrentOrNewerAgentDoesNotReceiveUpdate(t *testing.T) {
+	for _, agentVersion := range []string{"1.2.0", "1.3.0", "dev"} {
+		api, _ := testAPI()
+		api.latestAgentVersion = "1.2.0"
+		payload := validHTTPTestReport(t)
+		payload.Agent.AgentVersion = agentVersion
+		body, _ := json.Marshal(payload)
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/reports", bytes.NewReader(body))
+		request.Header.Set("Authorization", "Bearer node-token")
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		api.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusAccepted {
+			t.Fatalf("version %s returned %d: %s", agentVersion, response.Code, response.Body.String())
+		}
+		var receipt report.ReportReceipt
+		if err := json.NewDecoder(response.Body).Decode(&receipt); err != nil {
+			t.Fatal(err)
+		}
+		if receipt.AgentUpdate != nil {
+			t.Errorf("version %s unexpectedly received update %+v", agentVersion, receipt.AgentUpdate)
+		}
+	}
+}
+
 func TestAdminRegistrationRequiresAdminToken(t *testing.T) {
 	api, database := testAPI()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/nodes", bytes.NewReader([]byte(`{"hostname":"node"}`)))

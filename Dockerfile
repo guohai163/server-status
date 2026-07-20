@@ -6,7 +6,10 @@ COPY cmd ./cmd
 COPY internal ./internal
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w" -o /out/server-status-server ./cmd/server
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
+    -ldflags "-s -w -X github.com/guohai/server-status/internal/server.Version=$VERSION" \
+    -o /out/server-status-server ./cmd/server
 
 FROM alpine:3.22
 LABEL org.opencontainers.image.source="https://github.com/guohai163/server-status"

@@ -36,10 +36,10 @@ func NewClient(serverURL, token string) *Client {
 	}
 }
 
-func (client *Client) Send(ctx context.Context, payload report.Report) error {
+func (client *Client) Send(ctx context.Context, payload report.Report) (report.ReportReceipt, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("encode report: %w", err)
+		return report.ReportReceipt{}, fmt.Errorf("encode report: %w", err)
 	}
 	var lastError error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -49,26 +49,26 @@ func (client *Client) Send(ctx context.Context, payload report.Report) error {
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return ctx.Err()
+				return report.ReportReceipt{}, ctx.Err()
 			case <-timer.C:
 			}
 		}
-		retryable, err := client.sendOnce(ctx, body)
+		receipt, retryable, err := client.sendOnce(ctx, body)
 		if err == nil {
-			return nil
+			return receipt, nil
 		}
 		lastError = err
 		if !retryable {
-			return err
+			return report.ReportReceipt{}, err
 		}
 	}
-	return fmt.Errorf("send report after 3 attempts: %w", lastError)
+	return report.ReportReceipt{}, fmt.Errorf("send report after 3 attempts: %w", lastError)
 }
 
-func (client *Client) sendOnce(ctx context.Context, body []byte) (bool, error) {
+func (client *Client) sendOnce(ctx context.Context, body []byte) (report.ReportReceipt, bool, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return false, fmt.Errorf("create request: %w", err)
+		return report.ReportReceipt{}, false, fmt.Errorf("create request: %w", err)
 	}
 	request.Header.Set("Authorization", "Bearer "+client.token)
 	request.Header.Set("Content-Type", "application/json")
@@ -76,13 +76,20 @@ func (client *Client) sendOnce(ctx context.Context, body []byte) (bool, error) {
 
 	response, err := client.http.Do(request)
 	if err != nil {
-		return ctx.Err() == nil, fmt.Errorf("send report: %w", err)
+		return report.ReportReceipt{}, ctx.Err() == nil, fmt.Errorf("send report: %w", err)
 	}
 	defer response.Body.Close()
 	responseBody, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 	if response.StatusCode != http.StatusAccepted {
 		retryable := response.StatusCode == http.StatusRequestTimeout || response.StatusCode == http.StatusTooEarly || response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500
-		return retryable, fmt.Errorf("server returned %s: %s", response.Status, bytes.TrimSpace(responseBody))
+		return report.ReportReceipt{}, retryable, fmt.Errorf("server returned %s: %s", response.Status, bytes.TrimSpace(responseBody))
 	}
-	return false, nil
+	var receipt report.ReportReceipt
+	if err := json.Unmarshal(responseBody, &receipt); err != nil {
+		return report.ReportReceipt{}, false, fmt.Errorf("decode report receipt: %w", err)
+	}
+	if receipt.Status != "accepted" {
+		return report.ReportReceipt{}, false, fmt.Errorf("unexpected report receipt status %q", receipt.Status)
+	}
+	return receipt, false, nil
 }

@@ -82,7 +82,17 @@ curl http://10.12.54.200:8080/api/v1/nodes
 SERVER_STATUS_CENTRAL_ENV_FILE=/secure/central.env scripts/deploy-central.sh
 ```
 
-新节点和后续版本更新默认使用中心看板生成的安装命令。留空 Agent 版本时安装最新稳定 Release；填写语义版本时固定下载对应 Release。重复执行同一条命令会原子替换二进制、刷新配置与守护记录并验证首条上报。
+新节点默认使用中心看板生成的安装命令。留空 Agent 版本时安装最新稳定 Release；填写语义版本时固定下载对应 Release。重复执行同一条命令会原子替换二进制、刷新配置与守护记录并验证首条上报。
+
+正式发布的中心镜像会保存构建它的 Release 版本，并将该版本视为当前 Agent 最新版本。Agent 每次成功上报后，中心比较上报的 `agent_version`；仅当 Agent 版本更低时，响应才携带固定目标版本。支持自更新的 Agent 随后执行：
+
+1. 从中心 Release 缓存下载本机架构的固定版本二进制和 `checksums.txt`。
+2. 校验 SHA-256，并运行临时二进制的 `--version` 确认版本。
+3. 在原安装目录原子替换 Agent 二进制并立即重新执行。
+
+自更新不会调用注册接口，也不会读写 `agent.env`，因此 Agent ID、Node Token、标签与采集配置保持不变；版本相同或更高时不会更新或降级。开发构建的中心版本为 `dev`，不会下发自动更新。
+
+旧 Agent 不认识上报响应中的更新指令，必须先通过安装命令或兼容部署脚本手动升级一次到包含自更新能力的版本。此后部署新版中心镜像即可触发低版本 Agent 在下一次上报后自动更新。
 
 兼容的旧版远程部署仍可从仓库执行；它需要本机 Go、make、Python、SSH/SCP 及免交互登录权限：
 
@@ -90,7 +100,7 @@ SERVER_STATUS_CENTRAL_ENV_FILE=/secure/central.env scripts/deploy-central.sh
 ./scripts/deploy-agent.sh
 ```
 
-安装流程不会在仓库保存数据库密码、Admin Token 或 Node Token。Agent 更新采用临时文件后原子替换，避免覆盖运行中二进制时出现 `Text file busy`。
+安装流程不会在仓库保存数据库密码、Admin Token 或 Node Token。手动和自动更新都采用同目录临时文件后原子替换，避免覆盖运行中二进制时出现 `Text file busy`。
 
 ## 发布产物
 

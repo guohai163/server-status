@@ -23,6 +23,11 @@ func (r *Report) Validate(now time.Time) error {
 	if strings.TrimSpace(r.Agent.Hostname) == "" || strings.TrimSpace(r.Agent.OSName) == "" || strings.TrimSpace(r.Agent.Architecture) == "" || strings.TrimSpace(r.Agent.AgentVersion) == "" {
 		return errors.New("agent hostname, os_name, architecture, and agent_version are required")
 	}
+	switch r.Agent.MachineType {
+	case "", "physical", "virtual":
+	default:
+		return errors.New("agent machine_type must be physical or virtual")
+	}
 	if r.CollectedAt.IsZero() {
 		return errors.New("collected_at is required")
 	}
