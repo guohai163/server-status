@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.4.3 - 2026-07-20
+## v0.4.4 - 2026-07-20
 
 ### Added
 - Proxy, verify, and persistently cache Agent Release assets on the central server so target nodes no longer need direct GitHub access.

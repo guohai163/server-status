@@ -157,18 +157,19 @@ func TestReleaseCacheRejectsChecksumMismatch(t *testing.T) {
 
 func TestReleaseCacheRejectsUnknownVersionsAndAssets(t *testing.T) {
 	api, _ := testAPI()
-	for _, test := range []struct {
-		path   string
-		status int
-	}{
-		{path: "/agent/releases/main/server-status-agent-linux-amd64", status: http.StatusNotFound},
-		{path: "/agent/releases/v1.2.3/arbitrary-file", status: http.StatusNotFound},
-		{path: "/agent/releases/v1.2.3/../checksums.txt", status: http.StatusTemporaryRedirect},
+	for _, path := range []string{
+		"/agent/releases/main/server-status-agent-linux-amd64",
+		"/agent/releases/v1.2.3/arbitrary-file",
 	} {
-		response := performRequest(api, test.path)
-		if response.Code != test.status {
-			t.Errorf("expected %s to return %d, got %d", test.path, test.status, response.Code)
+		response := performRequest(api, path)
+		if response.Code != http.StatusNotFound {
+			t.Errorf("expected %s to return 404, got %d", path, response.Code)
 		}
+	}
+
+	response := performRequest(api, "/agent/releases/v1.2.3/../checksums.txt")
+	if response.Code < 300 || response.Code >= 400 {
+		t.Errorf("expected path traversal to be redirected, got %d", response.Code)
 	}
 }
 

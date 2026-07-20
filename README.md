@@ -150,7 +150,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V003__disk_io_metrics.sql
 SERVER_STATUS_DATABASE_URL=postgres://server_status_app:password@postgres:5432/server_status_db?sslmode=disable
 SERVER_STATUS_ADMIN_TOKEN=至少32位随机字符串
 SERVER_STATUS_LISTEN_ADDR=:8080
-SERVER_STATUS_CENTRAL_IMAGE=ghcr.io/guohai163/server-status-central:0.4.3
+SERVER_STATUS_CENTRAL_IMAGE=ghcr.io/guohai163/server-status-central:0.4.4
 ```
 
 Admin Token 只用于节点注册、令牌轮换和管理员查询。
