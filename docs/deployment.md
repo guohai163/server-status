@@ -7,7 +7,7 @@
 - 容器：`server-status-central`
 - HTTP：`http://10.12.54.200:8080`
 - 配置：`/home/gydev/server-status-central/.env`，权限 `0600`
-- 镜像：`ghcr.io/guohai163/server-status-central:0.4.1`
+- 镜像：`ghcr.io/guohai163/server-status-central:0.4.2`
 - 重启策略：Docker `unless-stopped`
 - 容器安全：非 root 用户、只读根文件系统、移除全部 Linux capabilities
 

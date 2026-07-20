@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.2 - 2026-07-20
+
+### Added
+- Show operating system details, memory and disk capacities, and 1/5/15-minute load averages on node cards.
+- Expose current load averages in the public node summary API.
+
 ## v0.4.1 - 2026-07-20
 
 ### Fixed

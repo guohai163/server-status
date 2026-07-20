@@ -26,6 +26,9 @@ type NodeSummary struct {
 	SecondsSinceLastSeen  int64             `json:"seconds_since_last_seen"`
 	LatestBucketAt        *time.Time        `json:"latest_bucket_at,omitempty"`
 	CPUUsagePercent       float64           `json:"cpu_usage_percent"`
+	Load1                 float64           `json:"load_1"`
+	Load5                 float64           `json:"load_5"`
+	Load15                float64           `json:"load_15"`
 	MemoryTotalBytes      int64             `json:"memory_total_bytes"`
 	MemoryUsedBytes       int64             `json:"memory_used_bytes"`
 	MemoryUsagePercent    float64           `json:"memory_usage_percent"`
@@ -204,6 +207,9 @@ const nodeSummarySQL = `
 		status.seconds_since_last_seen,
 		status.latest_bucket_at,
 		COALESCE(status.cpu_usage_percent, 0)::double precision,
+		COALESCE(status.load_1, 0)::double precision,
+		COALESCE(status.load_5, 0)::double precision,
+		COALESCE(status.load_15, 0)::double precision,
 		COALESCE(status.memory_total_bytes, 0),
 		COALESCE(status.memory_used_bytes, 0),
 		COALESCE(status.memory_usage_percent, 0)::double precision,
@@ -263,7 +269,7 @@ func scanNodeSummary(row scanner) (NodeSummary, error) {
 		&item.NodeID, &item.AgentID, &item.Hostname, &item.DisplayName,
 		&item.OSName, &item.OSVersion, &item.Architecture, &item.AgentVersion,
 		&labelsJSON, &item.LastSeenAt, &item.Status, &item.PrimaryIP, &item.SecondsSinceLastSeen,
-		&item.LatestBucketAt, &item.CPUUsagePercent,
+		&item.LatestBucketAt, &item.CPUUsagePercent, &item.Load1, &item.Load5, &item.Load15,
 		&item.MemoryTotalBytes, &item.MemoryUsedBytes, &item.MemoryUsagePercent, &item.UptimeSeconds,
 		&item.CPUPackageCount, &item.CPUPhysicalCoreCount, &item.CPULogicalThreadCount, &item.CPUModels,
 		&item.MemoryModuleCount, &item.InventoryMemoryBytes, &item.MemoryModels,

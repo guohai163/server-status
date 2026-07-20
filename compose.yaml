@@ -1,6 +1,6 @@
 services:
   central:
-    image: ${SERVER_STATUS_CENTRAL_IMAGE:-ghcr.io/guohai163/server-status-central:0.4.1}
+    image: ${SERVER_STATUS_CENTRAL_IMAGE:-ghcr.io/guohai163/server-status-central:0.4.2}
     container_name: server-status-central
     restart: unless-stopped
     env_file:

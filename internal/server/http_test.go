@@ -21,6 +21,7 @@ type fakeStore struct {
 	auth       store.NodeAuth
 	ingested   bool
 	registered bool
+	nodes      []store.NodeSummary
 }
 
 func (fake *fakeStore) Ready(context.Context) error { return nil }
@@ -36,7 +37,7 @@ func (fake *fakeStore) RegisterNode(context.Context, store.RegisterNodeInput) (s
 	return store.NodeCredentials{NodeID: "10000000-0000-4000-8000-000000000001", AgentID: fake.auth.AgentID, Token: "node-token"}, nil
 }
 func (fake *fakeStore) ListNodes(context.Context) ([]store.NodeSummary, error) {
-	return []store.NodeSummary{}, nil
+	return fake.nodes, nil
 }
 func (fake *fakeStore) GetNode(context.Context, string) (store.NodeDetail, error) {
 	return store.NodeDetail{}, store.ErrNotFound
@@ -106,6 +107,33 @@ func TestPublicNodeListDoesNotRequireAuthentication(t *testing.T) {
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected public list to return 200, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestPublicNodeListIncludesLoadAveragesAndCapacities(t *testing.T) {
+	api, database := testAPI()
+	database.nodes = []store.NodeSummary{{
+		NodeID: "10000000-0000-4000-8000-000000000001",
+		Load1:  1.25, Load5: 0.75, Load15: 0.5,
+		MemoryTotalBytes: 8 << 30, DiskTotalBytes: 100 << 30,
+	}}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Nodes []store.NodeSummary `json:"nodes"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Nodes) != 1 || payload.Nodes[0].Load1 != 1.25 || payload.Nodes[0].Load5 != 0.75 || payload.Nodes[0].Load15 != 0.5 {
+		t.Fatalf("unexpected load averages: %+v", payload.Nodes)
+	}
+	if payload.Nodes[0].MemoryTotalBytes != 8<<30 || payload.Nodes[0].DiskTotalBytes != 100<<30 {
+		t.Fatalf("unexpected capacities: %+v", payload.Nodes[0])
 	}
 }
 

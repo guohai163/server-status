@@ -44,3 +44,11 @@ func TestDiskUsageQueriesExcludeReadOnlyFilesystems(t *testing.T) {
 		t.Error("current disk usage query does not exclude removed filesystems")
 	}
 }
+
+func TestNodeSummaryQueryIncludesLoadAverages(t *testing.T) {
+	for _, field := range []string{"status.load_1", "status.load_5", "status.load_15"} {
+		if !strings.Contains(nodeSummarySQL, field) {
+			t.Errorf("node summary query does not select %s", field)
+		}
+	}
+}

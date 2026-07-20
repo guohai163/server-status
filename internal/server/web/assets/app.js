@@ -48,6 +48,13 @@
     const hours = Math.floor((value % 86400) / 3600);
     return days > 0 ? `${days} 天 ${hours} 小时` : `${hours} 小时`;
   }
+  function formatLoad(value) { return (Number(value) || 0).toFixed(2); }
+  function formatOS(node) {
+    const name = String(node.os_name || "").trim();
+    const version = String(node.os_version || "").trim();
+    if (!name || name === "unknown") return "系统待采集";
+    return version ? `${name}: ${version}` : name;
+  }
   function formatTime(value, includeSeconds) {
     if (!value) return "--";
     return new Intl.DateTimeFormat("zh-CN", {
@@ -101,19 +108,21 @@
     }, {});
     const cards = nodes.map((node) => {
       const memoryPercent = node.memory_usage_percent || 0;
+      const addressAndOS = `${node.primary_ip || "未获取 IP"} - ${formatOS(node)}`;
       return `<button class="node-card" type="button" data-node-id="${escapeHTML(node.node_id)}">
         <div class="card-head">
-          <div class="card-title"><strong>${escapeHTML(displayName(node))}</strong><span>${escapeHTML(node.primary_ip || "未获取 IP")}</span></div>
+          <div class="card-title"><strong>${escapeHTML(displayName(node))}</strong><span>${escapeHTML(addressAndOS)}</span></div>
           <span class="status-label"><i class="status-dot ${escapeHTML(node.status)}"></i>${escapeHTML(statusText(node.status))}</span>
         </div>
         <div class="metric-list">
           ${progress("CPU", node.cpu_usage_percent)}
-          ${progress("内存", memoryPercent)}
-          ${progress("磁盘", node.disk_usage_percent)}
+          ${progress(`内存 · ${formatBytes(node.memory_total_bytes)}`, memoryPercent)}
+          ${progress(`磁盘 · ${formatBytes(node.disk_total_bytes)}`, node.disk_usage_percent)}
         </div>
         <div class="io-strip">
           <div class="io-item"><span>磁盘读取</span><strong>↓ ${formatRate(node.disk_read_bytes_per_second)}</strong></div>
           <div class="io-item"><span>磁盘写入</span><strong>↑ ${formatRate(node.disk_write_bytes_per_second)}</strong></div>
+          <div class="io-item load-item"><span>Load Average (1/5/15)</span><strong>${formatLoad(node.load_1)} / ${formatLoad(node.load_5)} / ${formatLoad(node.load_15)}</strong></div>
         </div>
       </button>`;
     }).join("");

@@ -76,7 +76,7 @@ button { color: inherit; }
 .command-button:disabled, .primary-button:disabled, .secondary-button:disabled { cursor: wait; opacity: .65; }
 
 .node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 14px; }
-.node-card { width: 100%; min-height: 286px; padding: 18px; text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; }
+.node-card { width: 100%; min-height: 326px; padding: 18px; text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; }
 .node-card:hover { border-color: #aeb8bf; box-shadow: 0 7px 22px rgba(32, 42, 49, .08); transform: translateY(-1px); }
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
 .card-title { min-width: 0; }
@@ -94,6 +94,8 @@ button { color: inherit; }
 .io-item span, .io-item strong { display: block; }
 .io-item span { color: var(--quiet); font-size: 11px; }
 .io-item strong { margin-top: 3px; color: var(--ink); font: 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.load-item { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: 12px; padding-top: 10px; border-top: 1px solid #edf0f2; }
+.load-item strong { flex: 0 0 auto; margin-top: 0; }
 
 .detail-head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 24px; }
 .back-button { flex: 0 0 auto; width: 36px; height: 36px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); cursor: pointer; font-size: 19px; }
@@ -187,7 +189,7 @@ button { color: inherit; }
   .page-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
   .page-heading h1 { font-size: 21px; }
   .node-grid { grid-template-columns: 1fr; }
-  .node-card { min-height: 278px; }
+  .node-card { min-height: 318px; }
   .detail-head { gap: 10px; }
   .detail-title h1 { font-size: 19px; line-height: 26px; }
   .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
