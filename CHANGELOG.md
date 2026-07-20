@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.5.1 - 2026-07-21
+
+### Changed
+- Show each node's current Agent version beside its colored availability indicator instead of repeating the textual online status.
+- Reduce the physical-server icon size in dashboard card titles.
+
+### Fixed
+- Prefer an IPv4 address bound to a detected Linux bridge for node display and `/24` grouping, while preserving the existing address fallback for nodes without a bridge.
+
 ## v0.5.0 - 2026-07-20
 
 ### Added

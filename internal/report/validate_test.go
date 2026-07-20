@@ -78,6 +78,15 @@ func TestReportValidationRejectsInvalidMachineType(t *testing.T) {
 	}
 }
 
+func TestReportValidationRejectsInvalidPrimaryIP(t *testing.T) {
+	now := time.Now().UTC()
+	payload := validTestReport(t, now)
+	payload.Agent.PrimaryIP = "10.0.0.1/24"
+	if err := payload.Validate(now); err == nil {
+		t.Fatal("primary IP with a prefix was accepted")
+	}
+}
+
 func validTestReport(t *testing.T, now time.Time) Report {
 	t.Helper()
 	inventory := Inventory{

@@ -3,6 +3,7 @@ package agent
 import (
 	"testing"
 
+	"github.com/guohai/server-status/internal/report"
 	"github.com/shirou/gopsutil/v4/disk"
 )
 
@@ -49,6 +50,23 @@ func TestAddressScope(t *testing.T) {
 		if got := addressScope(address); got != expected {
 			t.Errorf("scope for %s: expected %s, got %s", address, expected, got)
 		}
+	}
+}
+
+func TestPreferredBridgeIPv4(t *testing.T) {
+	interfaces := []report.NetworkInterface{
+		{Name: "eno1", Addresses: []report.NetworkAddress{{Address: "10.100.119.241/24", Scope: "private"}}},
+		{Name: "vmbr0", Addresses: []report.NetworkAddress{
+			{Address: "2001:db8::1/64", Scope: "global"},
+			{Address: "10.100.119.183/24", Scope: "private"},
+		}},
+	}
+	isBridge := func(name string) bool { return name == "vmbr0" }
+	if got := preferredBridgeIPv4(interfaces, isBridge); got != "10.100.119.183" {
+		t.Fatalf("expected bridge IPv4, got %q", got)
+	}
+	if got := preferredBridgeIPv4(interfaces, func(string) bool { return false }); got != "" {
+		t.Fatalf("expected no preferred address without a bridge, got %q", got)
 	}
 }
 

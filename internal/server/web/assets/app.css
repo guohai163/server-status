@@ -180,11 +180,12 @@ button { color: inherit; }
 .node-card:hover { border-color: var(--control-line-hover); box-shadow: 0 7px 22px var(--card-shadow); transform: translateY(-1px); }
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
 .card-title { min-width: 0; }
-.card-name { display: flex; min-width: 0; align-items: center; gap: 7px; color: var(--ink); font-size: 16px; line-height: 22px; }
+.card-name { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--ink); font-size: 16px; line-height: 22px; }
 .card-name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.physical-server-icon { width: 21px; height: 20px; flex: 0 0 auto; object-fit: contain; }
+.physical-server-icon { width: 16px; height: 16px; flex: 0 0 auto; object-fit: contain; }
 .card-meta { display: block; margin-top: 2px; color: var(--muted); font: 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .status-label { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+.agent-version { font: 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .metric-list { display: grid; gap: 13px; }
 .metric-row-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px; color: var(--muted); font-size: 12px; }
 .metric-row-head strong { color: var(--ink); font-size: 12px; font-weight: 650; }

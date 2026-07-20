@@ -132,11 +132,13 @@
   function nodeCard(node) {
     const memoryPercent = node.memory_usage_percent || 0;
     const addressAndOS = `${node.primary_ip || "未获取 IP"} - ${formatOS(node)}`;
+    const agentVersion = String(node.agent_version || "--").trim() || "--";
+    const status = statusText(node.status);
     const physicalIcon = isPhysicalNode(node) ? '<img class="physical-server-icon" src="/assets/cloud-server.svg" alt="" title="物理服务器">' : "";
     return `<button class="node-card" type="button" data-node-id="${escapeHTML(node.node_id)}">
       <div class="card-head">
         <div class="card-title"><strong class="card-name">${physicalIcon}<span>${escapeHTML(displayName(node))}</span></strong><span class="card-meta">${escapeHTML(addressAndOS)}</span></div>
-        <span class="status-label"><i class="status-dot ${escapeHTML(node.status)}"></i>${escapeHTML(statusText(node.status))}</span>
+        <span class="status-label" aria-label="${escapeHTML(`${status}，Agent ${agentVersion}`)}" title="${escapeHTML(`${status} · Agent ${agentVersion}`)}"><i class="status-dot ${escapeHTML(node.status)}" aria-hidden="true"></i><span class="agent-version">${escapeHTML(agentVersion)}</span></span>
       </div>
       <div class="metric-list">
         ${progress(cpuLabel(node), node.cpu_usage_percent)}

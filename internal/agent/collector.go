@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -126,6 +127,7 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 			Architecture:  runtime.GOARCH,
 			AgentVersion:  Version,
 			MachineType:   classifyMachineType(hostInfo.VirtualizationRole),
+			PrimaryIP:     preferredBridgeIPv4(networkInterfaces, isBridgeInterface),
 			Labels:        config.Labels,
 		},
 		Inventory: report.Inventory{
@@ -591,6 +593,54 @@ func addressScope(value string) string {
 	default:
 		return "unknown"
 	}
+}
+
+func isBridgeInterface(name string) bool {
+	info, err := os.Stat(filepath.Join("/sys/class/net", name, "bridge"))
+	return err == nil && info.IsDir()
+}
+
+func preferredBridgeIPv4(interfaces []report.NetworkInterface, isBridge func(string) bool) string {
+	type candidate struct {
+		address netip.Addr
+		scope   int
+	}
+	candidates := make([]candidate, 0)
+	for _, networkInterface := range interfaces {
+		if !isBridge(networkInterface.Name) {
+			continue
+		}
+		for _, networkAddress := range networkInterface.Addresses {
+			prefix, err := netip.ParsePrefix(networkAddress.Address)
+			if err != nil {
+				continue
+			}
+			address := prefix.Addr().Unmap()
+			if !address.Is4() {
+				continue
+			}
+			scope := 3
+			switch networkAddress.Scope {
+			case "global":
+				scope = 0
+			case "private":
+				scope = 1
+			case "link":
+				scope = 2
+			}
+			candidates = append(candidates, candidate{address: address, scope: scope})
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].scope != candidates[j].scope {
+			return candidates[i].scope < candidates[j].scope
+		}
+		return candidates[i].address.Compare(candidates[j].address) < 0
+	})
+	if len(candidates) == 0 {
+		return ""
+	}
+	return candidates[0].address.String()
 }
 
 func readLinkSpeed(name string) int {

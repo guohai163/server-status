@@ -206,7 +206,7 @@ const nodeSummarySQL = `
 		COALESCE(status.labels->>'server_status.machine_type', ''),
 		status.last_seen_at,
 		status.status,
-		COALESCE(primary_address.address, ''),
+		COALESCE(NULLIF(status.labels->>'server_status.primary_ip', ''), primary_address.address, ''),
 		status.seconds_since_last_seen,
 		status.latest_bucket_at,
 		COALESCE(status.cpu_usage_percent, 0)::double precision,

@@ -28,6 +28,9 @@ func (r *Report) Validate(now time.Time) error {
 	default:
 		return errors.New("agent machine_type must be physical or virtual")
 	}
+	if r.Agent.PrimaryIP != "" && net.ParseIP(r.Agent.PrimaryIP) == nil {
+		return errors.New("agent primary_ip must be an IP address")
+	}
 	if r.CollectedAt.IsZero() {
 		return errors.New("collected_at is required")
 	}

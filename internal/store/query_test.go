@@ -60,3 +60,10 @@ func TestNodeSummaryQueryIncludesMachineAndPackageDetails(t *testing.T) {
 		}
 	}
 }
+
+func TestNodeSummaryQueryPrefersReportedBridgeIP(t *testing.T) {
+	expected := "COALESCE(NULLIF(status.labels->>'" + primaryIPLabelKey + "', ''), primary_address.address, '')"
+	if !strings.Contains(nodeSummarySQL, expected) {
+		t.Error("node summary query does not prefer the Agent-reported bridge IP")
+	}
+}

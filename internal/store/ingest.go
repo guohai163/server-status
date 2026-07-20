@@ -13,12 +13,15 @@ import (
 func (store *Store) Ingest(ctx context.Context, auth NodeAuth, payload report.Report) error {
 	receivedAt := time.Now().UTC()
 	bucketAt := payload.CollectedAt.UTC().Truncate(time.Minute)
-	agentLabels := make(map[string]string, len(payload.Agent.Labels)+1)
+	agentLabels := make(map[string]string, len(payload.Agent.Labels)+2)
 	for key, value := range payload.Agent.Labels {
 		agentLabels[key] = value
 	}
 	if payload.Agent.MachineType != "" {
 		agentLabels[machineTypeLabelKey] = payload.Agent.MachineType
+	}
+	if payload.Agent.PrimaryIP != "" {
+		agentLabels[primaryIPLabelKey] = payload.Agent.PrimaryIP
 	}
 	labels, err := json.Marshal(agentLabels)
 	if err != nil {
