@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/guohai/server-status/internal/report"
@@ -417,6 +418,7 @@ func syncNetworkInterfaces(ctx context.Context, tx pgx.Tx, nodeID string, items 
 	keys := make([]string, 0, len(items))
 	for _, item := range items {
 		keys = append(keys, item.Key)
+		macAddress := postgresMACAddress(item.MACAddress)
 		var interfaceID string
 		err := tx.QueryRow(ctx, `
 			UPDATE monitoring.network_interfaces SET
@@ -424,7 +426,7 @@ func syncNetworkInterfaces(ctx context.Context, tx pgx.Tx, nodeID string, items 
 				mtu = NULLIF($5, 0), link_speed_mbps = NULLIF($6, 0), last_seen_at = $7
 			WHERE node_id = $1::uuid AND interface_key = $2 AND removed_at IS NULL
 			RETURNING id::text
-		`, nodeID, item.Key, item.Name, item.MACAddress, item.MTU, item.LinkSpeedMbps, at).Scan(&interfaceID)
+		`, nodeID, item.Key, item.Name, macAddress, item.MTU, item.LinkSpeedMbps, at).Scan(&interfaceID)
 		if err == pgx.ErrNoRows {
 			err = tx.QueryRow(ctx, `
 				INSERT INTO monitoring.network_interfaces (
@@ -432,7 +434,7 @@ func syncNetworkInterfaces(ctx context.Context, tx pgx.Tx, nodeID string, items 
 					link_speed_mbps, first_seen_at, last_seen_at
 				) VALUES ($1::uuid, $2, $3, NULLIF($4, '')::macaddr, NULLIF($5, 0), NULLIF($6, 0), $7, $7)
 				RETURNING id::text
-			`, nodeID, item.Key, item.Name, item.MACAddress, item.MTU, item.LinkSpeedMbps, at).Scan(&interfaceID)
+			`, nodeID, item.Key, item.Name, macAddress, item.MTU, item.LinkSpeedMbps, at).Scan(&interfaceID)
 		}
 		if err != nil {
 			return fmt.Errorf("upsert network interface %q: %w", item.Key, err)
@@ -564,4 +566,12 @@ func nonNilStrings(values []string) []string {
 		return []string{}
 	}
 	return values
+}
+
+func postgresMACAddress(value string) string {
+	address, err := net.ParseMAC(value)
+	if err != nil || len(address) != 6 {
+		return ""
+	}
+	return address.String()
 }

@@ -418,7 +418,10 @@ func (collector *WindowsCollector) collectNetworkInterfaces() ([]NetworkInterfac
 		if item.Flags&net.FlagLoopback != 0 {
 			continue
 		}
-		mac := strings.ToLower(item.HardwareAddr.String())
+		mac := ""
+		if len(item.HardwareAddr) == 6 {
+			mac = strings.ToLower(item.HardwareAddr.String())
+		}
 		key := item.Name
 		if mac != "" {
 			key += "|" + mac
