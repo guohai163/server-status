@@ -382,12 +382,13 @@ func syncFilesystems(ctx context.Context, tx pgx.Tx, nodeID string, items []repo
 	keys := make([]string, 0, len(items))
 	for _, item := range items {
 		keys = append(keys, item.Key)
+		mountOptions := nonNilStrings(item.MountOptions)
 		result, err := tx.Exec(ctx, `
 			UPDATE monitoring.filesystems SET
 				filesystem_uuid = NULLIF($3, ''), device_name = $4, filesystem_type = $5,
 				mount_point = $6, mount_options = $7, last_seen_at = $8
 			WHERE node_id = $1::uuid AND filesystem_key = $2 AND removed_at IS NULL
-		`, nodeID, item.Key, item.UUID, item.DeviceName, item.FilesystemType, item.MountPoint, item.MountOptions, at)
+		`, nodeID, item.Key, item.UUID, item.DeviceName, item.FilesystemType, item.MountPoint, mountOptions, at)
 		if err != nil {
 			return fmt.Errorf("update filesystem %q: %w", item.Key, err)
 		}
@@ -397,7 +398,7 @@ func syncFilesystems(ctx context.Context, tx pgx.Tx, nodeID string, items []repo
 					node_id, filesystem_key, filesystem_uuid, device_name, filesystem_type,
 					mount_point, mount_options, first_seen_at, last_seen_at
 				) VALUES ($1::uuid, $2, NULLIF($3, ''), $4, $5, $6, $7, $8, $8)
-			`, nodeID, item.Key, item.UUID, item.DeviceName, item.FilesystemType, item.MountPoint, item.MountOptions, at); err != nil {
+			`, nodeID, item.Key, item.UUID, item.DeviceName, item.FilesystemType, item.MountPoint, mountOptions, at); err != nil {
 				return fmt.Errorf("insert filesystem %q: %w", item.Key, err)
 			}
 		}
@@ -556,4 +557,11 @@ func activeGPUIDs(ctx context.Context, tx pgx.Tx, nodeID string) (map[string]act
 
 func i64(value uint64) int64 {
 	return int64(value)
+}
+
+func nonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }

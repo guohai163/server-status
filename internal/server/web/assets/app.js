@@ -702,8 +702,8 @@
       ];
       if (environment) installArguments.push(`--environment "${environment}"`);
       return [
-        `bitsadmin /transfer ServerStatusAgent /download /priority normal "${downloadURL}" "%CD%\\server-status-agent.exe"`,
-        `server-status-agent.exe ${installArguments.join(" ")}`
+        `cmd.exe /d /c bitsadmin /transfer ServerStatusAgent /download /priority normal "${downloadURL}" "%CD%\\server-status-agent.exe"`,
+        `.\\server-status-agent.exe ${installArguments.join(" ")}`
       ].join("\r\n");
     }
     const variables = [

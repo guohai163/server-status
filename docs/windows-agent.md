@@ -44,12 +44,12 @@ Release 工作流会先用当前 Go 构建 Linux Agent，再切换到 Go 1.10.8 
 
 1. 在中心看板点击“添加节点”。
 2. 目标平台选择 Windows 32 位或 Windows 64 位。
-3. 在目标机器以管理员身份打开命令提示符，执行看板生成的两行命令。
+3. 在目标机器以管理员身份打开命令提示符或 PowerShell，执行看板生成的两行命令。
 
-生成的命令会通过中心 Release 缓存下载对应 `.exe`，随后执行：
+生成的第一行命令会显式调用 `cmd.exe`，因此其中的 `%CD%` 在命令提示符和 PowerShell 中都能正确展开。下载完成后，第二行使用 `.\` 形式从当前目录运行 Agent：
 
 ```bat
-server-status-agent.exe install --server "http://central:8080" --id "AGENT_UUID" --token "NODE_TOKEN" --environment "production"
+.\server-status-agent.exe install --server "http://central:8080" --id "AGENT_UUID" --token "NODE_TOKEN" --environment "production"
 ```
 
 安装程序执行以下操作：

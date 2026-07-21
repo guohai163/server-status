@@ -35,6 +35,9 @@ var (
 	activeServiceStop                 chan struct{}
 	activeServiceStopOnce             sync.Once
 	activeServiceStatusHandle         uintptr
+	serviceCallbacksOnce              sync.Once
+	serviceMainCallbackPointer        uintptr
+	serviceControlCallbackPointer     uintptr
 )
 
 type serviceTableEntry struct {
@@ -58,23 +61,30 @@ func runWindowsService(configPath string) error {
 	if err != nil {
 		return err
 	}
+	serviceCallbacksOnce.Do(func() {
+		serviceMainCallbackPointer = syscall.NewCallback(serviceMainCallback)
+		serviceControlCallbackPointer = syscall.NewCallback(serviceControlCallback)
+	})
 	table := [2]serviceTableEntry{
-		{Name: name, Proc: syscall.NewCallback(serviceMainCallback)},
+		{Name: name, Proc: serviceMainCallbackPointer},
 		{},
 	}
+	appendServiceBootstrapLog(configPath, "service dispatcher starting")
 	ok, _, callErr := procStartServiceCtrlDispatcherW.Call(uintptr(unsafe.Pointer(&table[0])))
 	if ok == 0 {
+		appendServiceBootstrapLog(configPath, fmt.Sprintf("service dispatcher failed: %v", callErr))
 		return fmt.Errorf("StartServiceCtrlDispatcher failed: %v", callErr)
 	}
 	return nil
 }
 
-func serviceMainCallback(argc, argv uintptr) uintptr {
+func serviceMainCallback(argc uint32, argv **uint16) uintptr {
+	appendServiceBootstrapLog(activeServiceConfigPath, "service main callback entered")
 	name, _ := syscall.UTF16PtrFromString(serviceName)
 	handle, _, callErr := procRegisterServiceCtrlHandlerExW.Call(
-		uintptr(unsafe.Pointer(name)), syscall.NewCallback(serviceControlCallback), 0)
+		uintptr(unsafe.Pointer(name)), serviceControlCallbackPointer, 0)
 	if handle == 0 {
-		_ = callErr
+		appendServiceBootstrapLog(activeServiceConfigPath, fmt.Sprintf("register service control handler failed: %v", callErr))
 		return 0
 	}
 	activeServiceStatusHandle = handle
@@ -147,4 +157,16 @@ func serviceLogger(configPath string) (*log.Logger, *os.File, error) {
 		return nil, nil, err
 	}
 	return log.New(file, "", log.Ldate|log.Ltime|log.LUTC), file, nil
+}
+
+func appendServiceBootstrapLog(configPath, message string) {
+	path := directoryOf(configPath) + "\\agent.log"
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return
+	}
+	logger := log.New(file, "", log.Ldate|log.Ltime|log.LUTC)
+	logger.Printf("service bootstrap: %s", message)
+	_ = file.Close()
+	_ = protectPath(path)
 }
