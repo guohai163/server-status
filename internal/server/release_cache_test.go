@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -170,6 +171,30 @@ func TestReleaseCacheRejectsUnknownVersionsAndAssets(t *testing.T) {
 	response := performRequest(api, "/agent/releases/v1.2.3/../checksums.txt")
 	if response.Code < 300 || response.Code >= 400 {
 		t.Errorf("expected path traversal to be redirected, got %d", response.Code)
+	}
+}
+
+func TestReleaseCacheServesWindowsAgent(t *testing.T) {
+	amd64 := []byte("linux-amd64-agent")
+	arm64 := []byte("linux-arm64-agent")
+	windows := []byte("windows-386-agent")
+	checksums := append(releaseChecksums(amd64, arm64), []byte(fmt.Sprintf(
+		"%x  server-status-agent-windows-386.exe\n", sha256.Sum256(windows)))...)
+	cache := testReleaseCache(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/releases/download/v1.2.3/checksums.txt":
+			_, _ = response.Write(checksums)
+		case "/releases/download/v1.2.3/server-status-agent-windows-386.exe":
+			_, _ = response.Write(windows)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	api, _ := testAPI()
+	api.releases = cache
+	response := performRequest(api, "/agent/releases/v1.2.3/server-status-agent-windows-386.exe")
+	if response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), windows) {
+		t.Fatalf("unexpected Windows asset response: status=%d body=%q", response.Code, response.Body.Bytes())
 	}
 }
 

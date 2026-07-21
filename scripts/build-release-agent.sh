@@ -39,16 +39,6 @@ for arch in $ARCHES; do
   chmod 0755 "$output"
 done
 
-checksums="$OUTPUT_DIR/checksums.txt"
-: > "$checksums"
-for file in "$OUTPUT_DIR"/server-status-agent-linux-*; do
-  name=$(basename "$file")
-  if command -v sha256sum >/dev/null 2>&1; then
-    digest=$(sha256sum "$file" | awk '{print $1}')
-  else
-    digest=$(shasum -a 256 "$file" | awk '{print $1}')
-  fi
-  printf '%s  %s\n' "$digest" "$name" >> "$checksums"
-done
+./scripts/write-release-checksums.sh "$OUTPUT_DIR"
 
 echo "release assets written to $OUTPUT_DIR"

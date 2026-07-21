@@ -45,6 +45,14 @@
         <input id="node-environment" name="environment" type="text" value="production" maxlength="64" pattern="[A-Za-z0-9._-]{1,64}" autocomplete="off">
       </label>
       <label class="field">
+        <span>目标平台</span>
+        <select id="node-platform" name="platform">
+          <option value="linux">Linux</option>
+          <option value="windows-386">Windows 2003/2008 32 位</option>
+          <option value="windows-amd64">Windows 2003/2008 64 位</option>
+        </select>
+      </label>
+      <label class="field">
         <span>Agent 版本</span>
         <input id="agent-version" name="agent_version" type="text" placeholder="latest" pattern="v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?" autocomplete="off">
       </label>

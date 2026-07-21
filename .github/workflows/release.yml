@@ -30,6 +30,13 @@ jobs:
         run: go test ./...
       - name: Run static checks
         run: go vet ./...
+      - name: Set up legacy Go for Windows compatibility validation
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: 1.10.8
+          cache: false
+      - name: Validate Windows Server 2003/2008 builds
+        run: ./scripts/build-release-windows-agent.sh "$GITHUB_REF_NAME" dist/windows-validation
 
   release-agent:
     name: Publish Agent binaries
@@ -57,6 +64,13 @@ jobs:
           fi
       - name: Build static Agent binaries
         run: ./scripts/build-release-agent.sh "$GITHUB_REF_NAME" dist/release
+      - name: Set up legacy Go for Windows Server 2003/2008
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: 1.10.8
+          cache: false
+      - name: Build legacy Windows Agent binaries
+        run: ./scripts/build-release-windows-agent.sh "$GITHUB_REF_NAME" dist/release
       - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -158,7 +172,9 @@ jobs:
           for expected in \
             checksums.txt \
             server-status-agent-linux-amd64 \
-            server-status-agent-linux-arm64; do
+            server-status-agent-linux-arm64 \
+            server-status-agent-windows-386.exe \
+            server-status-agent-windows-amd64.exe; do
             if ! grep -Fxq "$expected" <<<"$assets"; then
               echo "missing release asset: $expected" >&2
               exit 1

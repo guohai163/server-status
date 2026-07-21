@@ -6,6 +6,8 @@ Server Status 是一个面向 Linux 服务器的轻量监控系统，由节点 A
 - `server-status-server`：以 Docker 容器运行，负责鉴权、校验、事务入库、查询、定时汇总和 Web 数据展示。
 - PostgreSQL：保存节点身份、硬件变更历史、分钟原始指标、最新状态和小时汇总。
 
+另提供独立的 Windows Server 2003/2008 兼容 Agent。它使用 Go 1.10.8 和 Win32 API 实现，以 Windows 服务运行，不与 Linux Agent 共享采集或更新代码。安装与兼容边界见 [docs/windows-agent.md](docs/windows-agent.md)。
+
 当前默认部署目标：
 
 | 组件 | 地址 | 运行方式 |
@@ -94,6 +96,8 @@ go vet ./...
 make build
 make build-agent-linux
 make build-agent-release VERSION=0.3.2
+# 需要 Go 1.10.8
+make build-windows-agent-release VERSION=0.3.2
 ```
 
 产物：
@@ -103,6 +107,7 @@ make build-agent-release VERSION=0.3.2
 - `dist/server-status-agent-linux-amd64`：Ubuntu/CentOS x86_64 静态 Agent。
 - `dist/release/server-status-agent-linux-{amd64,arm64}`：带版本信息的发布二进制。
 - `dist/release/checksums.txt`：发布二进制的 SHA-256 校验值。
+- `dist/release/server-status-agent-windows-{386,amd64}.exe`：Windows Server 2003/2008 Agent。
 
 Agent 版本由构建时注入，可以直接检查：
 

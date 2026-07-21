@@ -687,8 +687,25 @@
     return `'${String(value).replace(/'/g, `'\\''`)}'`;
   }
 
-  function buildInstallCommand(credentials, environment, version) {
+  function buildInstallCommand(credentials, environment, version, platform) {
     const origin = location.origin;
+    if (platform.startsWith("windows-")) {
+      const architecture = platform === "windows-386" ? "386" : "amd64";
+      const release = version ? `v${version.replace(/^v/, "")}` : "latest";
+      const asset = `server-status-agent-windows-${architecture}.exe`;
+      const downloadURL = `${origin}/agent/releases/${release}/${asset}`;
+      const installArguments = [
+        "install",
+        `--server "${origin}"`,
+        `--id "${credentials.agent_id}"`,
+        `--token "${credentials.token}"`
+      ];
+      if (environment) installArguments.push(`--environment "${environment}"`);
+      return [
+        `bitsadmin /transfer ServerStatusAgent /download /priority normal "${downloadURL}" "%CD%\\server-status-agent.exe"`,
+        `server-status-agent.exe ${installArguments.join(" ")}`
+      ].join("\r\n");
+    }
     const variables = [
       `SERVER_STATUS_URL=${shellQuote(origin)}`,
       `SERVER_STATUS_AGENT_ID=${shellQuote(credentials.agent_id)}`,
@@ -724,6 +741,7 @@
     const displayNameValue = document.getElementById("node-display-name").value.trim();
     const environment = document.getElementById("node-environment").value.trim();
     const version = document.getElementById("agent-version").value.trim();
+    const platform = document.getElementById("node-platform").value;
     if (!adminToken || !displayNameValue) {
       addNodeError.textContent = "Admin Token 和显示名称不能为空";
       addNodeError.hidden = false;
@@ -731,6 +749,11 @@
     }
     const payload = { display_name: displayNameValue };
     if (environment) payload.labels = { environment };
+    if (platform.startsWith("windows-")) {
+      payload.os_name = "Windows";
+      payload.architecture = platform === "windows-386" ? "386" : "amd64";
+      payload.agent_version = "windows-legacy-pending";
+    }
 
     addNodeError.hidden = true;
     createNodeButton.disabled = true;
@@ -754,7 +777,7 @@
       const credentials = await response.json();
       rememberAdminToken(adminToken);
       document.getElementById("admin-token").value = "";
-      installCommand.textContent = buildInstallCommand(credentials, environment, version);
+      installCommand.textContent = buildInstallCommand(credentials, environment, version, platform);
       addNodeForm.hidden = true;
       installCommandResult.hidden = false;
       await loadNodes(true);
