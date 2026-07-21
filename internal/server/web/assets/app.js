@@ -39,6 +39,7 @@
   let cachedAdminTokenExpiresAt = storedAdminToken.expiresAt;
   let pendingNetworkPreference = null;
   let pendingTagNodeID = null;
+  let selectedOS = "";
   let selectedTag = "";
 
   const chartColorVariables = {
@@ -113,8 +114,15 @@
   function formatOS(node) {
     const name = String(node.os_name || "").trim();
     const version = String(node.os_version || "").trim();
-    if (!name || name === "unknown") return "系统待采集";
+    if (!name || name.toLowerCase() === "unknown") return "系统待采集";
     return version ? `${name}: ${version}` : name;
+  }
+  function osFilterValue(node) {
+    const name = String(node.os_name || "").trim();
+    return !name || name.toLowerCase() === "unknown" ? "__unknown__" : name.toLowerCase();
+  }
+  function osFilterLabel(node) {
+    return osFilterValue(node) === "__unknown__" ? "待采集" : String(node.os_name).trim();
   }
   function formatTime(value, includeSeconds) {
     if (!value) return "--";
@@ -248,14 +256,25 @@
 
   function renderList() {
     currentDetail = null;
+    const osLabels = new Map();
     const tagLabels = new Map();
+    nodes.forEach((node) => {
+      const key = osFilterValue(node);
+      if (!osLabels.has(key)) osLabels.set(key, osFilterLabel(node));
+    });
     nodes.flatMap((node) => node.tags || []).forEach((tag) => {
       const key = tag.toLowerCase();
       if (!tagLabels.has(key)) tagLabels.set(key, tag);
     });
+    const availableOS = Array.from(osLabels, ([key, label]) => ({ key, label })).sort((left, right) => left.label.localeCompare(right.label, "zh-CN", { sensitivity: "base" }));
     const availableTags = Array.from(tagLabels, ([key, label]) => ({ key, label })).sort((left, right) => left.label.localeCompare(right.label, "zh-CN", { sensitivity: "base" }));
+    if (selectedOS && !osLabels.has(selectedOS)) selectedOS = "";
     if (selectedTag && !tagLabels.has(selectedTag)) selectedTag = "";
-    const visibleNodes = selectedTag ? nodes.filter((node) => (node.tags || []).some((tag) => tag.toLowerCase() === selectedTag)) : nodes;
+    const visibleNodes = nodes.filter((node) => {
+      const matchesOS = !selectedOS || osFilterValue(node) === selectedOS;
+      const matchesTag = !selectedTag || (node.tags || []).some((tag) => tag.toLowerCase() === selectedTag);
+      return matchesOS && matchesTag;
+    });
     const counts = visibleNodes.reduce((result, node) => {
       result[node.status] = (result[node.status] || 0) + 1;
       return result;
@@ -267,11 +286,14 @@
       </div>
       <div class="node-grid">${group.nodes.map(nodeCard).join("")}</div>
     </section>`).join("");
+    const osOptions = availableOS.map((os) => `<option value="${escapeHTML(os.key)}"${os.key === selectedOS ? " selected" : ""}>${escapeHTML(os.label)}</option>`).join("");
     const tagOptions = availableTags.map((tag) => `<option value="${escapeHTML(tag.key)}"${tag.key === selectedTag ? " selected" : ""}>${escapeHTML(tag.label)}</option>`).join("");
+    const hasActiveFilter = selectedOS || selectedTag;
     app.innerHTML = `<div class="page-heading">
-      <div><h1>节点状态</h1><p>${selectedTag ? `${visibleNodes.length} / ${nodes.length}` : nodes.length} 台服务器的最新一分钟快照</p></div>
+      <div><h1>节点状态</h1><p>${hasActiveFilter ? `${visibleNodes.length} / ${nodes.length}` : nodes.length} 台服务器的最新一分钟快照</p></div>
       <div class="list-tools">
-        <label class="tag-filter"><span>Tag</span><select id="tag-filter"${availableTags.length ? "" : " disabled"}><option value="">全部</option>${tagOptions}</select></label>
+        <label class="list-filter"><span>操作系统</span><select id="os-filter"${availableOS.length ? "" : " disabled"}><option value="">全部</option>${osOptions}</select></label>
+        <label class="list-filter"><span>Tag</span><select id="tag-filter"${availableTags.length ? "" : " disabled"}><option value="">全部</option>${tagOptions}</select></label>
         <div class="status-counts">
         <span class="status-count"><i class="status-dot online"></i>在线 <strong>${counts.online || 0}</strong></span>
         <span class="status-count"><i class="status-dot offline"></i>离线 <strong>${counts.offline || 0}</strong></span>
@@ -280,6 +302,10 @@
         </div>
       </div>
     </div>${visibleNodes.length ? `<div class="node-groups">${groups}</div>` : `<div class="empty-state"><strong>${nodes.length ? "没有匹配的节点" : "暂无节点"}</strong></div>`}`;
+    document.getElementById("os-filter").addEventListener("change", (event) => {
+      selectedOS = event.target.value;
+      renderList();
+    });
     document.getElementById("tag-filter").addEventListener("change", (event) => {
       selectedTag = event.target.value;
       renderList();
