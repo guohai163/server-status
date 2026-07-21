@@ -19,21 +19,23 @@ import (
 )
 
 const (
-	defaultReleaseCacheDir = "/tmp/server-status-release-cache"
-	releaseUpstreamBase    = "https://github.com/guohai163/server-status/releases"
-	maxReleaseAssetBytes   = 64 << 20
-	maxChecksumsBytes      = 1 << 20
+	defaultReleaseCacheDir   = "/tmp/server-status-release-cache"
+	defaultBundledReleaseDir = "/usr/local/share/server-status/agent-releases"
+	releaseUpstreamBase      = "https://github.com/guohai163/server-status/releases"
+	maxReleaseAssetBytes     = 64 << 20
+	maxChecksumsBytes        = 1 << 20
 )
 
 var releaseVersionPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$`)
 
 type releaseCache struct {
-	directory    string
-	upstreamBase string
-	client       *http.Client
-	logger       *slog.Logger
-	latestTTL    time.Duration
-	mu           sync.Mutex
+	directory        string
+	bundledDirectory string
+	upstreamBase     string
+	client           *http.Client
+	logger           *slog.Logger
+	latestTTL        time.Duration
+	mu               sync.Mutex
 }
 
 func (api *API) releaseAsset(response http.ResponseWriter, request *http.Request) {
@@ -45,11 +47,12 @@ func newReleaseCache(directory string, logger *slog.Logger) *releaseCache {
 		directory = defaultReleaseCacheDir
 	}
 	return &releaseCache{
-		directory:    directory,
-		upstreamBase: releaseUpstreamBase,
-		client:       &http.Client{Timeout: 3 * time.Minute},
-		logger:       logger,
-		latestTTL:    10 * time.Minute,
+		directory:        directory,
+		bundledDirectory: defaultBundledReleaseDir,
+		upstreamBase:     releaseUpstreamBase,
+		client:           &http.Client{Timeout: 3 * time.Minute},
+		logger:           logger,
+		latestTTL:        10 * time.Minute,
 	}
 }
 
@@ -87,7 +90,11 @@ func (cache *releaseCache) serve(response http.ResponseWriter, request *http.Req
 		response.Header().Set("Content-Type", "application/octet-stream")
 	}
 	response.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, asset))
-	response.Header().Set("X-Server-Status-Cache", map[bool]string{true: "HIT", false: "MISS"}[hit])
+	cacheStatus := map[bool]string{true: "HIT", false: "MISS"}[hit]
+	if cache.isBundledPath(path) {
+		cacheStatus = "BUNDLED"
+	}
+	response.Header().Set("X-Server-Status-Cache", cacheStatus)
 	if version == "latest" {
 		response.Header().Set("Cache-Control", "public, max-age=300")
 	} else {
@@ -97,6 +104,10 @@ func (cache *releaseCache) serve(response http.ResponseWriter, request *http.Req
 }
 
 func (cache *releaseCache) assetPath(ctx context.Context, version, asset string) (string, bool, error) {
+	if path, found, err := cache.bundledAssetPath(version, asset); found || err != nil {
+		return path, true, err
+	}
+
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 
@@ -153,6 +164,58 @@ func (cache *releaseCache) assetPath(ctx context.Context, version, asset string)
 		return assetPath, false, nil
 	}
 	return assetPath, checksumsHit && assetHit, nil
+}
+
+func (cache *releaseCache) bundledAssetPath(version, asset string) (string, bool, error) {
+	if strings.TrimSpace(cache.bundledDirectory) == "" {
+		return "", false, nil
+	}
+	directory := filepath.Join(cache.bundledDirectory, version)
+	checksumsPath := filepath.Join(directory, "checksums.txt")
+	info, err := os.Stat(checksumsPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", true, fmt.Errorf("inspect bundled checksums: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() == 0 {
+		return "", true, errors.New("bundled checksums file is empty or not regular")
+	}
+	checksums, err := os.ReadFile(checksumsPath)
+	if err != nil {
+		return "", true, fmt.Errorf("read bundled checksums: %w", err)
+	}
+	if _, err := parseReleaseChecksums(checksums); err != nil {
+		return "", true, fmt.Errorf("validate bundled checksums: %w", err)
+	}
+	if asset == "checksums.txt" {
+		return checksumsPath, true, nil
+	}
+	expected, err := checksumForAsset(checksums, asset)
+	if err != nil {
+		return "", true, err
+	}
+	assetPath := filepath.Join(directory, asset)
+	info, err = os.Stat(assetPath)
+	if err != nil {
+		return "", true, fmt.Errorf("inspect bundled %s: %w", asset, err)
+	}
+	if !info.Mode().IsRegular() || info.Size() == 0 {
+		return "", true, fmt.Errorf("bundled %s is empty or not regular", asset)
+	}
+	if err := verifyReleaseAsset(assetPath, expected); err != nil {
+		return "", true, fmt.Errorf("verify bundled %s: %w", asset, err)
+	}
+	return assetPath, true, nil
+}
+
+func (cache *releaseCache) isBundledPath(path string) bool {
+	if strings.TrimSpace(cache.bundledDirectory) == "" {
+		return false
+	}
+	relative, err := filepath.Rel(cache.bundledDirectory, path)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func (cache *releaseCache) ensureFile(ctx context.Context, version, asset string) (string, bool, error) {

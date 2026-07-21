@@ -199,3 +199,16 @@ jobs:
           docker buildx imagetools inspect "$IMAGE:$version" > image-manifest.txt
           grep -Fq "linux/amd64" image-manifest.txt
           grep -Fq "linux/arm64" image-manifest.txt
+      - name: Verify Agent assets bundled in central image
+        shell: bash
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          docker run --rm \
+            -e EXPECTED_VERSION="$version" \
+            --entrypoint sh \
+            "$IMAGE:$version" -c '
+              set -eu
+              cd /usr/local/share/server-status/agent-releases/latest
+              sha256sum -c checksums.txt
+              test "$(./server-status-agent-linux-amd64 --version)" = "$EXPECTED_VERSION"
+            '

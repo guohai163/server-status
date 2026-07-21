@@ -202,7 +202,7 @@ curl -fsSL 'https://中心节点/install-agent.sh' | sudo env \
   sh
 ```
 
-安装器从中心节点的 Release 缓存接口下载匹配架构的静态二进制和 `checksums.txt`，目标节点不需要访问 GitHub。中心首次请求某个资产时从 `guohai163/server-status` 的 GitHub Release 下载并校验 SHA-256，后续直接使用持久缓存；`latest` 缓存每 10 分钟允许刷新，固定版本长期复用。Agent 仍会在安装前再次校验 SHA-256，然后原子安装。默认路径：
+安装器从中心节点的 Release 接口下载匹配架构的静态二进制和 `checksums.txt`，目标节点不需要访问 GitHub。正式发布的中心镜像直接内置同版本的 Linux `amd64/arm64` 和 Windows `amd64` Agent；`latest` 与镜像固定版本优先读取并校验这些只读资产，不依赖 GitHub 或可写缓存。只有请求历史版本时，中心才从 `guohai163/server-status` 的 GitHub Release 下载、校验并写入持久缓存。Agent 仍会在安装前再次校验 SHA-256，然后原子安装。响应头 `X-Server-Status-Cache` 会分别标记 `BUNDLED`、`HIT` 或 `MISS`。默认路径：
 
 | 内容 | 路径 |
 | --- | --- |

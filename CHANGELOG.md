@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.11.0 - 2026-07-21
+
+### Added
+- Bundle matching-version Linux `amd64/arm64` and Windows `amd64` Agent binaries with unified SHA-256 checksums in every released central image.
+- Verify the bundled Agent assets and executable version after publishing the multi-architecture central image.
+
+### Changed
+- Serve `latest` and the central image's fixed Agent version from verified read-only bundled assets, while retaining the persistent GitHub-backed cache for historical versions.
+- Store the central image's writable Release cache under `/var/cache/server-status` instead of the size-limited `/tmp` filesystem.
+
+### Fixed
+- Prevent current-version Agent installation from returning 502 when the central container's temporary filesystem is full or GitHub is temporarily unreachable.
+
 ## v0.10.0 - 2026-07-21
 
 ### Added

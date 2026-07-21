@@ -90,6 +90,59 @@ func TestReleaseCacheUsesLatestReleaseURL(t *testing.T) {
 	}
 }
 
+func TestReleaseCachePrefersBundledAssetsWithoutUpstream(t *testing.T) {
+	amd64 := []byte("bundled-linux-amd64-agent")
+	arm64 := []byte("bundled-linux-arm64-agent")
+	windowsAMD64 := []byte("bundled-windows-amd64-agent")
+	checksums := append(releaseChecksums(amd64, arm64), []byte(fmt.Sprintf(
+		"%x  server-status-agent-windows-amd64.exe\n", sha256.Sum256(windowsAMD64)))...)
+	bundledRoot := t.TempDir()
+	releaseDirectory := filepath.Join(bundledRoot, "v1.2.3")
+	if err := os.MkdirAll(releaseDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string][]byte{
+		"checksums.txt":                         checksums,
+		"server-status-agent-linux-amd64":       amd64,
+		"server-status-agent-linux-arm64":       arm64,
+		"server-status-agent-windows-amd64.exe": windowsAMD64,
+	} {
+		if err := os.WriteFile(filepath.Join(releaseDirectory, name), content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink("v1.2.3", filepath.Join(bundledRoot, "latest")); err != nil {
+		t.Fatal(err)
+	}
+
+	upstreamRequests := 0
+	cache := testReleaseCache(t, http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		upstreamRequests++
+		http.Error(response, "unavailable", http.StatusServiceUnavailable)
+	}))
+	cache.bundledDirectory = bundledRoot
+	api, _ := testAPI()
+	api.releases = cache
+	for _, version := range []string{"v1.2.3", "latest"} {
+		for asset, content := range map[string][]byte{
+			"checksums.txt":                         checksums,
+			"server-status-agent-linux-amd64":       amd64,
+			"server-status-agent-windows-amd64.exe": windowsAMD64,
+		} {
+			response := performRequest(api, "/agent/releases/"+version+"/"+asset)
+			if response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), content) {
+				t.Fatalf("unexpected bundled %s/%s response: status=%d body=%q", version, asset, response.Code, response.Body.String())
+			}
+			if got := response.Header().Get("X-Server-Status-Cache"); got != "BUNDLED" {
+				t.Fatalf("expected bundled response header for %s/%s, got %q", version, asset, got)
+			}
+		}
+	}
+	if upstreamRequests != 0 {
+		t.Fatalf("bundled assets unexpectedly used upstream %d times", upstreamRequests)
+	}
+}
+
 func TestReleaseCacheUsesStaleLatestAssetWhenGitHubIsUnavailable(t *testing.T) {
 	amd64 := []byte("cached-amd64-agent")
 	arm64 := []byte("cached-arm64-agent")

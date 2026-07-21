@@ -86,7 +86,7 @@ SERVER_STATUS_CENTRAL_ENV_FILE=/secure/central.env scripts/deploy-central.sh
 
 新节点默认使用中心看板生成的安装命令。留空 Agent 版本时安装最新稳定 Release；填写语义版本时固定下载对应 Release。重复执行同一条命令会原子替换二进制、刷新配置与守护记录并验证首条上报。
 
-正式发布的中心镜像会保存构建它的 Release 版本，并将该版本视为当前 Agent 最新版本。Agent 每次成功上报后，中心比较上报的 `agent_version`；仅当 Agent 版本更低时，响应才携带固定目标版本。支持自更新的 Agent 随后执行：
+正式发布的中心镜像会保存构建它的 Release 版本，并内置同版本的 Linux `amd64/arm64`、Windows `amd64` Agent 及统一校验文件。`latest` 和镜像固定版本直接从只读内置目录提供，不依赖 GitHub 或运行时缓存；历史版本仍使用持久 Release 缓存。Agent 每次成功上报后，中心比较上报的 `agent_version`；仅当 Agent 版本更低时，响应才携带固定目标版本。支持自更新的 Agent 随后执行：
 
 1. 从中心 Release 缓存下载本机架构的固定版本二进制和 `checksums.txt`。
 2. 校验 SHA-256，并运行临时二进制的 `--version` 确认版本。
