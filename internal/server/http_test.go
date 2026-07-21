@@ -25,6 +25,9 @@ type fakeStore struct {
 	primaryNetworkNodeID        string
 	primaryNetworkInterfaceID   string
 	primaryNetworkPreferenceErr error
+	tagNodeID                   string
+	tags                        []string
+	tagUpdateErr                error
 }
 
 func (fake *fakeStore) Ready(context.Context) error { return nil }
@@ -49,6 +52,11 @@ func (fake *fakeStore) SetPrimaryNetworkInterface(_ context.Context, nodeID, int
 	fake.primaryNetworkNodeID = nodeID
 	fake.primaryNetworkInterfaceID = interfaceID
 	return fake.primaryNetworkPreferenceErr
+}
+func (fake *fakeStore) UpdateNodeTags(_ context.Context, nodeID string, tags []string) error {
+	fake.tagNodeID = nodeID
+	fake.tags = append([]string(nil), tags...)
+	return fake.tagUpdateErr
 }
 func (fake *fakeStore) GetNodeHistory(context.Context, string, string) (store.NodeHistory, error) {
 	return store.NodeHistory{}, store.ErrNotFound
@@ -172,6 +180,7 @@ func TestPublicNodeListIncludesLoadAveragesAndCapacities(t *testing.T) {
 		NodeID: "10000000-0000-4000-8000-000000000001",
 		Load1:  1.25, Load5: 0.75, Load15: 0.5,
 		MemoryTotalBytes: 8 << 30, DiskTotalBytes: 100 << 30, HasNVIDIAGPU: true,
+		Tags: []string{"production", "gpu"},
 	}}
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes", nil)
 	response := httptest.NewRecorder()
@@ -193,6 +202,9 @@ func TestPublicNodeListIncludesLoadAveragesAndCapacities(t *testing.T) {
 	}
 	if !payload.Nodes[0].HasNVIDIAGPU {
 		t.Fatal("NVIDIA GPU capability was omitted from the node list")
+	}
+	if len(payload.Nodes[0].Tags) != 2 || payload.Nodes[0].Tags[1] != "gpu" {
+		t.Fatalf("unexpected node tags: %+v", payload.Nodes[0].Tags)
 	}
 }
 
@@ -317,6 +329,83 @@ func TestSetPrimaryNetworkInterfaceReturnsNotFoundForInactiveInterface(t *testin
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestUpdateNodeTagsRequiresAdminToken(t *testing.T) {
+	api, database := testAPI()
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/nodes/10000000-0000-4000-8000-000000000001/tags", bytes.NewReader([]byte(`{"tags":["production"]}`)))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", response.Code, response.Body.String())
+	}
+	if database.tagNodeID != "" {
+		t.Fatal("unauthorized tag update reached the store")
+	}
+}
+
+func TestUpdateNodeTagsNormalizesValues(t *testing.T) {
+	api, database := testAPI()
+	nodeID := "10000000-0000-4000-8000-000000000001"
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/nodes/"+nodeID+"/tags", bytes.NewReader([]byte(`{"tags":[" production ","GPU"]}`)))
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	if database.tagNodeID != nodeID || len(database.tags) != 2 || database.tags[0] != "production" || database.tags[1] != "GPU" {
+		t.Fatalf("unexpected tag update: node=%q tags=%+v", database.tagNodeID, database.tags)
+	}
+}
+
+func TestUpdateNodeTagsCanClearValues(t *testing.T) {
+	api, database := testAPI()
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/nodes/10000000-0000-4000-8000-000000000001/tags", bytes.NewReader([]byte(`{"tags":[]}`)))
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || len(database.tags) != 0 {
+		t.Fatalf("expected tags to be cleared, status=%d tags=%+v", response.Code, database.tags)
+	}
+}
+
+func TestUpdateNodeTagsReturnsNotFound(t *testing.T) {
+	api, database := testAPI()
+	database.tagUpdateErr = store.ErrNotFound
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/nodes/10000000-0000-4000-8000-000000000001/tags", bytes.NewReader([]byte(`{"tags":["production"]}`)))
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestUpdateNodeTagsRejectsInvalidValues(t *testing.T) {
+	tests := []string{
+		`{"tags":["1","2","3","4","5","6"]}`,
+		`{"tags":["GPU","gpu"]}`,
+		`{"tags":[""]}`,
+	}
+	for _, body := range tests {
+		api, database := testAPI()
+		request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/nodes/10000000-0000-4000-8000-000000000001/tags", bytes.NewReader([]byte(body)))
+		request.Header.Set("Authorization", "Bearer "+testAdminToken)
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		api.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Errorf("body %s: expected 400, got %d: %s", body, response.Code, response.Body.String())
+		}
+		if database.tagNodeID != "" {
+			t.Errorf("body %s: invalid tags reached the store", body)
+		}
 	}
 }
 

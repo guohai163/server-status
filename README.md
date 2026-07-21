@@ -22,7 +22,7 @@ Server Status 是一个面向 Linux 服务器的轻量监控系统，由节点 A
 | 内存 | 插槽、厂商、型号、序列号、类型、容量、速率 | 总量、已用、可用、缓存、buffer、swap |
 | 磁盘 | 设备名、厂商、型号、序列号、WWN、介质类型、容量 | 挂载点容量和 inode、整机磁盘读写字节与 IOPS 增量 |
 | 网络 | 网卡、MAC、MTU、链路速率、IPv4/IPv6 | 链路状态、收发累计量、区间流量、包、错误和丢包 |
-| GPU | NVIDIA 型号、UUID、显存容量 | 每张 GPU 的核心使用率和显存使用率 |
+| GPU | NVIDIA 型号、UUID、显存容量 | 每张 GPU 的核心使用率、显存使用率和历史趋势 |
 
 磁盘硬件和文件系统使用率分别建模。这样可以正确处理 LVM、RAID、多挂载点和一个文件系统跨多个块设备的情况。
 
@@ -43,7 +43,7 @@ Server Status 是一个面向 Linux 服务器的轻量监控系统，由节点 A
 
 1. 对 Bearer Token 做 SHA-256 后查询数据库，原始 Token 不入库。
 2. 校验节点身份、JSON 字段、库存指纹、资源引用、时间窗口、百分比和 `bigint` 范围。
-3. 将节点信息、库存变化、分钟主快照、文件系统指标和网络指标放在同一个 PostgreSQL 事务中。
+3. 将节点信息、库存变化、分钟主快照、文件系统、网络和 GPU 指标放在同一个 PostgreSQL 事务中。
 4. 使用 `(bucket_at, node_id)` 作为分钟幂等键，同一分钟重试只会覆盖，不会生成重复数据。
 5. 只有库存指纹变化时才更新硬件清单，并用 `first_seen_at`、`last_seen_at`、`removed_at` 保留设备变更历史。
 6. 数据库触发器维护 current 表，乱序的旧数据不能覆盖较新的当前状态。
@@ -53,7 +53,7 @@ Server Status 是一个面向 Linux 服务器的轻量监控系统，由节点 A
 
 ```mermaid
 flowchart TD
-    A["Agent 启动或进入下一分钟"] --> B["采集 CPU、内存、磁盘、文件系统、网卡和 IP"]
+    A["Agent 启动或进入下一分钟"] --> B["采集 CPU、内存、磁盘、文件系统、网卡、GPU 和 IP"]
     B --> C["排序硬件清单并计算 SHA-256 指纹"]
     C --> D["计算网络与磁盘区间增量并组装 JSON 快照"]
     D --> E["POST /api/v1/reports<br/>Bearer Node Token"]
@@ -65,7 +65,7 @@ flowchart TD
     I -- "否" --> K["跳过清单写入"]
     J --> L["Upsert 节点分钟主快照"]
     K --> L
-    L --> M["替换该分钟的文件系统和网卡明细"]
+    L --> M["替换该分钟的文件系统、网卡和 GPU 明细"]
     M --> N["触发器更新 current 表"]
     N --> O["提交事务并返回 202 Accepted"]
     O --> P["公开状态 API / Web 仪表盘查询"]
@@ -77,7 +77,7 @@ flowchart TD
 
 - 分钟原始数据：按 UTC 天分区，保留 90 天。
 - 小时汇总：按 UTC 月分区，保留 24 个月。
-- 当前状态：每个节点、文件系统或网卡只保留一条最新记录，列表查询不扫描历史表。
+- 当前状态：每个节点、文件系统、网卡或 GPU 只保留一条最新记录，列表查询不扫描历史表。
 - 连续 3 分钟没有成功上报的节点显示为 `offline`。
 - 中心接受最多 24 小时的延迟数据，拒绝超过当前时间 5 分钟的未来数据。
 
@@ -141,6 +141,8 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V002__safe_partition_retention.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V003__disk_io_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V004__primary_network_interface.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V005__nvidia_gpu_metrics.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V006__node_tags.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V007__gpu_history_metrics.sql
 ```
 
 中央服务应使用继承 `server_status_writer` 的独立登录角色，不要使用 PostgreSQL 超级用户。
@@ -153,7 +155,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V005__nvidia_gpu_metrics.sql
 SERVER_STATUS_DATABASE_URL=postgres://server_status_app:password@postgres:5432/server_status_db?sslmode=disable
 SERVER_STATUS_ADMIN_TOKEN=至少32位随机字符串
 SERVER_STATUS_LISTEN_ADDR=:8080
-SERVER_STATUS_CENTRAL_IMAGE=ghcr.io/guohai163/server-status-central:0.7.0
+SERVER_STATUS_CENTRAL_IMAGE=ghcr.io/guohai163/server-status-central:0.8.0
 ```
 
 Admin Token 只用于节点注册、令牌轮换和管理员查询。
@@ -174,7 +176,7 @@ curl http://127.0.0.1:8080/readyz
 
 中心容器使用非 root 用户、只读根文件系统、移除全部 capabilities，并配置 `unless-stopped` 自动恢复。Compose 会挂载独立的 `agent_release_cache` 持久卷，用于缓存 Agent Release 资产。
 
-部署完成后直接访问 `http://中心节点地址:8080/`。Web 看板不需要登录：首屏以卡片显示所有节点的机器名、IP、CPU、内存、磁盘使用率和磁盘读写速率；点击卡片进入硬件、文件系统、网卡和历史趋势详情。节点上报和管理接口仍分别使用 Node Token 与 Admin Token。浏览器在 Admin Token 成功通过鉴权后会将其保存到本地 30 天，期间添加节点和选择首页 IP 无需重复填写；过期或接口返回 401 时自动清除。
+部署完成后直接访问 `http://中心节点地址:8080/`。Web 看板不需要登录：首屏以卡片显示所有节点的机器名、IP、Tag、CPU、内存、磁盘使用率和磁盘读写速率，并可在页面顶部按 Tag 筛选；点击卡片进入硬件、文件系统、网卡和历史趋势详情，GPU 节点会按每张卡分别显示核心和显存使用率趋势。每个节点最多设置 5 个 Tag。节点上报和管理接口仍分别使用 Node Token 与 Admin Token。浏览器在 Admin Token 成功通过鉴权后会将其保存到本地 30 天，期间添加节点、编辑 Tag 和选择首页 IP 无需重复填写；过期或接口返回 401 时自动清除。
 
 ## 一个脚本部署 Agent
 

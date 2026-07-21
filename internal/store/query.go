@@ -20,6 +20,7 @@ type NodeSummary struct {
 	Architecture          string            `json:"architecture"`
 	AgentVersion          string            `json:"agent_version"`
 	Labels                map[string]string `json:"labels"`
+	Tags                  []string          `json:"tags"`
 	MachineType           string            `json:"machine_type,omitempty"`
 	HasNVIDIAGPU          bool              `json:"has_nvidia_gpu"`
 	LastSeenAt            time.Time         `json:"last_seen_at"`
@@ -145,11 +146,26 @@ type HistoryPoint struct {
 	NetworkTXBytesPerSecond float64   `json:"network_tx_bytes_per_second"`
 }
 
+type GPUHistoryPoint struct {
+	BucketAt           time.Time `json:"bucket_at"`
+	UtilizationPercent float64   `json:"utilization_percent"`
+	MemoryUsagePercent float64   `json:"memory_usage_percent"`
+}
+
+type GPUHistorySeries struct {
+	GPUDeviceID string            `json:"gpu_device_id"`
+	Index       int               `json:"index"`
+	UUID        string            `json:"uuid"`
+	ModelName   string            `json:"model_name"`
+	Points      []GPUHistoryPoint `json:"points"`
+}
+
 type NodeHistory struct {
-	NodeID     string         `json:"node_id"`
-	Range      string         `json:"range"`
-	Resolution string         `json:"resolution"`
-	Points     []HistoryPoint `json:"points"`
+	NodeID     string             `json:"node_id"`
+	Range      string             `json:"range"`
+	Resolution string             `json:"resolution"`
+	Points     []HistoryPoint     `json:"points"`
+	GPUs       []GPUHistorySeries `json:"gpus"`
 }
 
 func (store *Store) ListNodes(ctx context.Context) ([]NodeSummary, error) {
@@ -228,6 +244,7 @@ const nodeSummarySQL = `
 		status.architecture,
 		status.agent_version,
 		status.labels,
+		node.tags,
 		COALESCE(status.labels->>'server_status.machine_type', ''),
 		EXISTS (
 			SELECT 1 FROM monitoring.gpu_devices gpu
@@ -264,6 +281,7 @@ const nodeSummarySQL = `
 		COALESCE(network_usage.rx_bytes_per_second, 0)::double precision,
 		COALESCE(network_usage.tx_bytes_per_second, 0)::double precision
 	  FROM monitoring.v_node_status status
+	  JOIN monitoring.nodes node ON node.id = status.node_id
 	  JOIN monitoring.v_node_hardware_summary hardware ON hardware.node_id = status.node_id
 	  LEFT JOIN LATERAL (
 		SELECT array_agg(cpu.logical_threads::bigint ORDER BY cpu.package_index, cpu.id) AS threads_per_package
@@ -317,7 +335,7 @@ func scanNodeSummary(row scanner) (NodeSummary, error) {
 	err := row.Scan(
 		&item.NodeID, &item.AgentID, &item.Hostname, &item.DisplayName,
 		&item.OSName, &item.OSVersion, &item.Architecture, &item.AgentVersion,
-		&labelsJSON, &item.MachineType, &item.HasNVIDIAGPU,
+		&labelsJSON, &item.Tags, &item.MachineType, &item.HasNVIDIAGPU,
 		&item.LastSeenAt, &item.Status, &item.PrimaryIP, &item.SecondsSinceLastSeen,
 		&item.LatestBucketAt, &item.CPUUsagePercent, &item.Load1, &item.Load5, &item.Load15,
 		&item.MemoryTotalBytes, &item.MemoryUsedBytes, &item.MemoryUsagePercent, &item.UptimeSeconds,
@@ -339,9 +357,27 @@ func scanNodeSummary(row scanner) (NodeSummary, error) {
 }
 
 func normalizeNodeSummary(item *NodeSummary) {
+	if item.Tags == nil {
+		item.Tags = []string{}
+	}
 	if item.LatestBucketAt == nil && item.Status != "disabled" {
 		item.Status = "pending"
 	}
+}
+
+func (store *Store) UpdateNodeTags(ctx context.Context, nodeID string, tags []string) error {
+	command, err := store.pool.Exec(ctx, `
+		UPDATE monitoring.nodes
+		   SET tags = $2::text[], updated_at = CURRENT_TIMESTAMP
+		 WHERE id = $1::uuid
+	`, nodeID, tags)
+	if err != nil {
+		return fmt.Errorf("update node tags: %w", err)
+	}
+	if command.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (store *Store) listFilesystems(ctx context.Context, nodeID string) ([]FilesystemStatus, error) {
@@ -558,9 +594,11 @@ func (store *Store) GetNodeHistory(ctx context.Context, nodeID, window string) (
 	start := time.Now().UTC().Add(-duration)
 	resolution := "minute"
 	query := rawHistorySQL
+	gpuQuery := rawGPUHistorySQL
 	if duration > 24*time.Hour {
 		resolution = "hour"
 		query = hourlyHistorySQL
+		gpuQuery = hourlyGPUHistorySQL
 	}
 	rows, err := store.pool.Query(ctx, query, nodeID, start)
 	if err != nil {
@@ -582,7 +620,54 @@ func (store *Store) GetNodeHistory(ctx context.Context, nodeID, window string) (
 	if err := rows.Err(); err != nil {
 		return NodeHistory{}, fmt.Errorf("iterate node history: %w", err)
 	}
-	return NodeHistory{NodeID: nodeID, Range: window, Resolution: resolution, Points: points}, nil
+	rows.Close()
+	gpus, err := store.queryGPUHistory(ctx, gpuQuery, nodeID, start)
+	if err != nil {
+		return NodeHistory{}, err
+	}
+	return NodeHistory{
+		NodeID: nodeID, Range: window, Resolution: resolution,
+		Points: points, GPUs: gpus,
+	}, nil
+}
+
+func (store *Store) queryGPUHistory(ctx context.Context, query, nodeID string, start time.Time) ([]GPUHistorySeries, error) {
+	rows, err := store.pool.Query(ctx, query, nodeID, start)
+	if err != nil {
+		return nil, fmt.Errorf("query GPU history: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]GPUHistorySeries, 0)
+	positions := make(map[string]int)
+	for rows.Next() {
+		var deviceID, uuid, modelName string
+		var deviceIndex int
+		var point GPUHistoryPoint
+		if err := rows.Scan(
+			&deviceID, &deviceIndex, &uuid, &modelName,
+			&point.BucketAt, &point.UtilizationPercent, &point.MemoryUsagePercent,
+		); err != nil {
+			return nil, fmt.Errorf("scan GPU history: %w", err)
+		}
+		position, ok := positions[deviceID]
+		if !ok {
+			position = len(result)
+			positions[deviceID] = position
+			result = append(result, GPUHistorySeries{
+				GPUDeviceID: deviceID,
+				Index:       deviceIndex,
+				UUID:        uuid,
+				ModelName:   modelName,
+				Points:      make([]GPUHistoryPoint, 0),
+			})
+		}
+		result[position].Points = append(result[position].Points, point)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate GPU history: %w", err)
+	}
+	return result, nil
 }
 
 const rawHistorySQL = `
@@ -645,4 +730,28 @@ const hourlyHistorySQL = `
 	  ) network ON true
 	 WHERE sample.node_id = $1::uuid AND sample.hour_at >= $2
 	 ORDER BY sample.hour_at
+`
+
+const rawGPUHistorySQL = `
+	SELECT gpu.id::text, gpu.device_index, gpu.gpu_uuid, gpu.model_name,
+	       sample.bucket_at,
+	       sample.utilization_percent::double precision,
+	       sample.memory_usage_percent::double precision
+	  FROM monitoring.gpu_metric_samples sample
+	  JOIN monitoring.gpu_devices gpu
+	    ON gpu.node_id = sample.node_id AND gpu.id = sample.gpu_id
+	 WHERE sample.node_id = $1::uuid AND sample.bucket_at >= $2
+	 ORDER BY gpu.device_index, gpu.gpu_uuid, sample.bucket_at
+`
+
+const hourlyGPUHistorySQL = `
+	SELECT gpu.id::text, gpu.device_index, gpu.gpu_uuid, gpu.model_name,
+	       sample.hour_at,
+	       sample.utilization_avg::double precision,
+	       sample.memory_usage_avg::double precision
+	  FROM monitoring.gpu_metric_hourly sample
+	  JOIN monitoring.gpu_devices gpu
+	    ON gpu.node_id = sample.node_id AND gpu.id = sample.gpu_id
+	 WHERE sample.node_id = $1::uuid AND sample.hour_at >= $2
+	 ORDER BY gpu.device_index, gpu.gpu_uuid, sample.hour_at
 `

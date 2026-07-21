@@ -54,7 +54,7 @@ func TestNodeSummaryQueryIncludesLoadAverages(t *testing.T) {
 }
 
 func TestNodeSummaryQueryIncludesMachineAndPackageDetails(t *testing.T) {
-	for _, field := range []string{machineTypeLabelKey, "threads_per_package", "monitoring.gpu_devices"} {
+	for _, field := range []string{machineTypeLabelKey, "threads_per_package", "monitoring.gpu_devices", "node.tags"} {
 		if !strings.Contains(nodeSummarySQL, field) {
 			t.Errorf("node summary query does not include %s", field)
 		}
@@ -84,5 +84,37 @@ func TestNodeSummaryQueryPrioritizesPreferredNetworkInterface(t *testing.T) {
 		!strings.Contains(nodeListOrderSQL, "primary_address.sort_address") ||
 		!strings.Contains(nodeListOrderSQL, primaryIPLabelKey) {
 		t.Error("node list is not ordered by the selected dashboard IP")
+	}
+}
+
+func TestGPUHistoryQueriesUsePerDeviceRawAndHourlyMetrics(t *testing.T) {
+	queries := map[string]struct {
+		query string
+		table string
+		value string
+	}{
+		"raw": {
+			query: rawGPUHistorySQL,
+			table: "monitoring.gpu_metric_samples",
+			value: "sample.memory_usage_percent",
+		},
+		"hourly": {
+			query: hourlyGPUHistorySQL,
+			table: "monitoring.gpu_metric_hourly",
+			value: "sample.memory_usage_avg",
+		},
+	}
+	for name, item := range queries {
+		for _, fragment := range []string{
+			item.table,
+			"gpu.id = sample.gpu_id",
+			"sample.node_id = $1::uuid",
+			item.value,
+			"gpu.device_index",
+		} {
+			if !strings.Contains(item.query, fragment) {
+				t.Errorf("%s GPU history query does not contain %q", name, fragment)
+			}
+		}
 	}
 }

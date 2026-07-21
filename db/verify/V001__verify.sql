@@ -53,12 +53,13 @@ BEGIN
       FROM pg_constraint
      WHERE conrelid IN (
                'monitoring.filesystem_metric_samples'::regclass,
-               'monitoring.network_metric_samples'::regclass
+               'monitoring.network_metric_samples'::regclass,
+               'monitoring.gpu_metric_samples'::regclass
            )
        AND confrelid = 'monitoring.node_metric_samples'::regclass
        AND contype = 'f';
-    IF v_fk_count <> 2 THEN
-        RAISE EXCEPTION 'retention removed parent foreign keys: expected 2, got %', v_fk_count;
+    IF v_fk_count <> 3 THEN
+        RAISE EXCEPTION 'retention removed parent foreign keys: expected 3, got %', v_fk_count;
     END IF;
 END
 $retention_assertions$;
@@ -88,6 +89,10 @@ INSERT INTO monitoring.node_api_tokens (
     '10000000-0000-0000-0000-000000000001',
     'verify01', decode(repeat('ab', 32), 'hex'), 'verification token'
 );
+
+UPDATE monitoring.nodes
+   SET tags = ARRAY['production', 'gpu']
+ WHERE id = '10000000-0000-0000-0000-000000000001';
 
 INSERT INTO monitoring.cpu_packages (
     id, node_id, hardware_key, package_index, vendor, model_name,
@@ -183,15 +188,6 @@ INSERT INTO monitoring.gpu_devices (
      'GPU-verify-1', 1, 'GPU-verify-1', 'NVIDIA Verify GPU 1', 25769803776,
      CURRENT_TIMESTAMP - INTERVAL '1 day', CURRENT_TIMESTAMP);
 
-INSERT INTO monitoring.gpu_current_metrics (
-    node_id, gpu_id, bucket_at, collected_at, received_at,
-    utilization_percent, memory_used_bytes
-) VALUES
-    ('10000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001',
-     date_trunc('minute', CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 25, 3221225472),
-    ('10000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000002',
-     date_trunc('minute', CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 80, 21474836480);
-
 INSERT INTO monitoring.node_metric_samples (
     bucket_at, node_id, collected_at, interval_seconds,
     cpu_usage_percent, load_1, load_5, load_15,
@@ -217,6 +213,23 @@ INSERT INTO monitoring.node_metric_samples (
      date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '50 minutes', 60,
      10, 0.1, 0.1, 0.1, 1000, 100, 800, 50, 10, 0, 0, 5000,
      1000, 2000, 0, 0, 0, 0);
+
+INSERT INTO monitoring.gpu_metric_samples (
+    bucket_at, node_id, gpu_id, utilization_percent,
+    memory_total_bytes, memory_used_bytes
+) VALUES
+    (date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '50 minutes',
+     '10000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001',
+     20, 12884901888, 3221225472),
+    (date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '49 minutes',
+     '10000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001',
+     40, 12884901888, 6442450944),
+    (date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '50 minutes',
+     '10000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000002',
+     60, 25769803776, 12884901888),
+    (date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '49 minutes',
+     '10000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000002',
+     80, 25769803776, 21474836480);
 
 INSERT INTO monitoring.filesystem_metric_samples (
     bucket_at, node_id, filesystem_id,
@@ -359,6 +372,22 @@ BEGIN
         RAISE EXCEPTION 'dashboard network preference was not persisted';
     END IF;
 
+    SELECT cardinality(tags) INTO v_count
+      FROM monitoring.nodes
+     WHERE id = '10000000-0000-0000-0000-000000000001';
+    IF v_count <> 2 THEN
+        RAISE EXCEPTION 'node tags were not persisted: %', v_count;
+    END IF;
+
+    BEGIN
+        UPDATE monitoring.nodes
+           SET tags = ARRAY['1', '2', '3', '4', '5', '6']
+         WHERE id = '10000000-0000-0000-0000-000000000001';
+        RAISE EXCEPTION 'node tag count constraint accepted more than five tags';
+    EXCEPTION WHEN check_violation THEN
+        NULL;
+    END;
+
     SELECT count(*) INTO v_count
       FROM monitoring.gpu_devices gpu
       JOIN monitoring.gpu_current_metrics metric
@@ -376,6 +405,13 @@ BEGIN
      WHERE gpu.id = 'a0000000-0000-0000-0000-000000000002';
     IF round(v_number, 1) <> 83.3 THEN
         RAISE EXCEPTION 'GPU memory utilization is incorrect: %', v_number;
+    END IF;
+
+    SELECT count(*) INTO v_count
+      FROM monitoring.gpu_metric_samples
+     WHERE node_id = '10000000-0000-0000-0000-000000000001';
+    IF v_count <> 4 THEN
+        RAISE EXCEPTION 'per-device GPU raw history is incomplete: %', v_count;
     END IF;
 
     IF EXISTS (
@@ -507,6 +543,33 @@ BEGIN
     IF v_number <> 1200 THEN
         RAISE EXCEPTION 'network hourly average rate is incorrect: %', v_number;
     END IF;
+
+    SELECT sample_count INTO v_count
+      FROM monitoring.gpu_metric_hourly
+     WHERE hour_at = date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '1 hour'
+       AND node_id = '10000000-0000-0000-0000-000000000001'
+       AND gpu_id = 'a0000000-0000-0000-0000-000000000001';
+    IF v_count <> 2 THEN
+        RAISE EXCEPTION 'GPU hourly sample count is incorrect: %', v_count;
+    END IF;
+
+    SELECT utilization_avg INTO v_number
+      FROM monitoring.gpu_metric_hourly
+     WHERE hour_at = date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '1 hour'
+       AND node_id = '10000000-0000-0000-0000-000000000001'
+       AND gpu_id = 'a0000000-0000-0000-0000-000000000001';
+    IF v_number <> 30 THEN
+        RAISE EXCEPTION 'GPU hourly utilization average is incorrect: %', v_number;
+    END IF;
+
+    SELECT memory_usage_avg INTO v_number
+      FROM monitoring.gpu_metric_hourly
+     WHERE hour_at = date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '1 hour'
+       AND node_id = '10000000-0000-0000-0000-000000000001'
+       AND gpu_id = 'a0000000-0000-0000-0000-000000000001';
+    IF v_number <> 37.5 THEN
+        RAISE EXCEPTION 'GPU hourly memory usage average is incorrect: %', v_number;
+    END IF;
 END
 $rollup_assertions$;
 
@@ -524,11 +587,11 @@ BEGIN
     IF NOT has_table_privilege('server_status_writer', 'monitoring.node_network_preferences', 'INSERT') THEN
         RAISE EXCEPTION 'writer role lacks INSERT on dashboard network preferences';
     END IF;
-    IF NOT has_table_privilege('server_status_writer', 'monitoring.gpu_current_metrics', 'INSERT') THEN
-        RAISE EXCEPTION 'writer role lacks INSERT on GPU current metrics';
+    IF NOT has_table_privilege('server_status_writer', 'monitoring.gpu_metric_samples', 'INSERT') THEN
+        RAISE EXCEPTION 'writer role lacks INSERT on GPU raw metrics';
     END IF;
-    IF has_table_privilege('server_status_reader', 'monitoring.gpu_current_metrics', 'INSERT') THEN
-        RAISE EXCEPTION 'reader role can modify GPU current metrics';
+    IF has_table_privilege('server_status_reader', 'monitoring.gpu_metric_samples', 'INSERT') THEN
+        RAISE EXCEPTION 'reader role can modify GPU raw metrics';
     END IF;
     IF has_table_privilege('server_status_reader', 'monitoring.node_network_preferences', 'INSERT') THEN
         RAISE EXCEPTION 'reader role can modify dashboard network preferences';
@@ -552,6 +615,10 @@ INSERT INTO monitoring.nodes (
     'verify-writer-role', 'Ubuntu', 'x86_64', '0.1.0',
     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 );
+
+UPDATE monitoring.nodes
+   SET tags = ARRAY['writer-managed']
+ WHERE id = '10000000-0000-0000-0000-000000000003';
 
 INSERT INTO monitoring.network_interfaces (
     id, node_id, interface_key, interface_name, first_seen_at, last_seen_at
@@ -597,6 +664,14 @@ BEGIN
            AND interface_id = '80000000-0000-0000-0000-000000000003'
     ) THEN
         RAISE EXCEPTION 'writer role could not persist dashboard network preference';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+          FROM monitoring.nodes
+         WHERE id = '10000000-0000-0000-0000-000000000003'
+           AND tags = ARRAY['writer-managed']
+    ) THEN
+        RAISE EXCEPTION 'writer role could not update node tags';
     END IF;
 END
 $writer_runtime_assertions$;

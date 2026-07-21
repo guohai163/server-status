@@ -85,6 +85,30 @@
       </div>
     </form>
   </dialog>
+  <dialog id="tag-dialog" class="preference-dialog tag-dialog" aria-labelledby="tag-dialog-title">
+    <div class="dialog-head">
+      <div><h2 id="tag-dialog-title">编辑 Tag</h2></div>
+      <button id="close-tag-dialog" class="icon-button" type="button" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <form id="tag-form" class="preference-form">
+      <div class="tag-input-grid">
+        <label class="field"><span>Tag 1</span><input data-tag-input type="text" maxlength="32" autocomplete="off"></label>
+        <label class="field"><span>Tag 2</span><input data-tag-input type="text" maxlength="32" autocomplete="off"></label>
+        <label class="field"><span>Tag 3</span><input data-tag-input type="text" maxlength="32" autocomplete="off"></label>
+        <label class="field"><span>Tag 4</span><input data-tag-input type="text" maxlength="32" autocomplete="off"></label>
+        <label class="field"><span>Tag 5</span><input data-tag-input type="text" maxlength="32" autocomplete="off"></label>
+      </div>
+      <label class="field">
+        <span>Admin Token</span>
+        <input id="tag-admin-token" name="admin_token" type="password" required autocomplete="off" spellcheck="false">
+      </label>
+      <p id="tag-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="secondary-button" type="button" data-close-tag-dialog>取消</button>
+        <button id="save-tags" class="primary-button" type="submit">保存</button>
+      </div>
+    </form>
+  </dialog>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+## v0.8.0 - 2026-07-21
+
+### Added
+- Persist per-GPU minute metrics and hourly rollups, and show separate GPU utilization and framebuffer memory history charts in node details.
+- Add up to five administrator-managed tags to every node card, with a top-level tag filter and an Admin Token-protected tag editor.
+
 ## v0.7.0 - 2026-07-21
 
 ### Added

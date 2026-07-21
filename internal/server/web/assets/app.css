@@ -38,6 +38,8 @@
   --spinner-track: #d7dde1;
   --segmented-bg: #edf1f3;
   --progress-track: #edf0f2;
+  --tag-bg: #eef3f6;
+  --tag-text: #41515c;
   --green: #16845b;
   --green-soft: #e5f4ed;
   --blue: #2878b9;
@@ -91,6 +93,8 @@
     --spinner-track: #3b4248;
     --segmented-bg: #151719;
     --progress-track: #2a3034;
+    --tag-bg: #2b3237;
+    --tag-text: #c5d0d7;
     --green: #4fc391;
     --green-soft: rgba(79, 195, 145, .17);
     --blue: #65aee5;
@@ -144,6 +148,11 @@ button { color: inherit; }
 .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
 .page-heading h1 { margin: 0; font-size: 24px; line-height: 32px; letter-spacing: 0; }
 .page-heading p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+.list-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
+.tag-filter { height: 32px; display: inline-flex; align-items: center; gap: 7px; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--muted); font-size: 11px; }
+.tag-filter select { min-width: 104px; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 12px; letter-spacing: 0; }
+.tag-filter:focus-within { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.tag-filter:has(select:disabled) { opacity: .6; }
 .status-counts { display: flex; flex-wrap: wrap; gap: 8px; }
 .status-count { display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 12px; }
 .status-count strong { color: var(--ink); }
@@ -176,7 +185,7 @@ button { color: inherit; }
 .node-group-head code { color: var(--ink); font: 650 13px/22px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .node-group-head span { flex: 0 0 auto; color: var(--quiet); font-size: 11px; }
 .node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 14px; }
-.node-card { width: 100%; min-height: 326px; padding: 18px; text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; }
+.node-card { width: 100%; min-height: 351px; padding: 18px; text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; }
 .node-card:hover { border-color: var(--control-line-hover); box-shadow: 0 7px 22px var(--card-shadow); transform: translateY(-1px); }
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
 .card-title { min-width: 0; }
@@ -184,6 +193,9 @@ button { color: inherit; }
 .card-name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .physical-server-icon, .nvidia-icon { width: 16px; height: 16px; flex: 0 0 auto; object-fit: contain; }
 .card-meta { display: block; margin-top: 2px; color: var(--muted); font: 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.card-tags, .detail-tag-list { display: flex; min-width: 0; flex-wrap: wrap; gap: 4px; }
+.card-tags { min-height: 20px; margin-top: 7px; }
+.tag-badge { max-width: 100%; padding: 2px 6px; overflow: hidden; border-radius: 3px; background: var(--tag-bg); color: var(--tag-text); font-size: 10px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .status-label { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
 .agent-version { font: 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .metric-list { display: grid; gap: 13px; }
@@ -206,6 +218,10 @@ button { color: inherit; }
 .detail-title h1 { margin: 0; overflow-wrap: anywhere; font-size: 22px; line-height: 30px; letter-spacing: 0; }
 .detail-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 5px; color: var(--muted); font-size: 12px; }
 .detail-meta code { color: var(--detail-code); }
+.detail-tags { min-height: 25px; display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.tag-edit-button { width: 24px; height: 24px; flex: 0 0 auto; padding: 0; border: 1px solid var(--control-line); border-radius: 4px; background: var(--surface); color: var(--muted); cursor: pointer; font-size: 17px; line-height: 20px; }
+.tag-edit-button:hover { border-color: var(--green); color: var(--green); }
+.tag-edit-button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 .metric-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .metric-tile { min-width: 0; padding: 16px; border-right: 1px solid var(--line); }
 .metric-tile:last-child { border-right: 0; }
@@ -221,6 +237,7 @@ button { color: inherit; }
 .range-button { min-width: 42px; height: 29px; padding: 0 8px; border: 0; border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; }
 .range-button.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px var(--control-shadow); }
 .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.gpu-history-grid { margin-top: 14px; }
 .chart-panel { min-width: 0; padding: 15px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .chart-panel h3 { margin: 0; font-size: 13px; line-height: 20px; }
 .legend { display: flex; flex-wrap: wrap; min-height: 22px; gap: 5px 12px; margin-top: 5px; color: var(--muted); font-size: 10px; }
@@ -244,10 +261,11 @@ button { color: inherit; }
 .gpu-section .data-table { min-width: 660px; }
 .gpu-section .data-table th:nth-child(1) { width: 36%; }
 .gpu-section .data-table th:nth-child(2), .gpu-section .data-table th:nth-child(3) { width: 20%; }
-.gpu-model { display: inline-flex; align-items: center; gap: 9px; }
+.gpu-model { width: 100%; max-width: 100%; display: inline-flex; align-items: center; gap: 9px; }
+.gpu-model > span { min-width: 0; }
 .gpu-model > span, .gpu-model strong, .gpu-model small { display: block; }
 .gpu-model strong { color: var(--ink); font-size: 12px; }
-.gpu-model small { margin-top: 2px; color: var(--muted); font-size: 11px; }
+.gpu-model small { margin-top: 2px; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; }
 .gpu-meter { min-width: 120px; }
 .gpu-meter strong { display: block; margin-bottom: 6px; color: var(--ink); font-size: 11px; }
 .gpu-cell-label { display: none; }
@@ -288,6 +306,7 @@ button { color: inherit; }
 .dialog-head p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
 .preference-form { display: grid; gap: 16px; padding: 22px; }
 .preference-form .form-error, .preference-form .dialog-actions { grid-column: 1; }
+.tag-input-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 20px 22px; border-bottom: 1px solid var(--line); }
 .dialog-head h2 { margin: 0; font-size: 18px; line-height: 26px; letter-spacing: 0; }
 .node-form { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 22px; }
@@ -319,8 +338,11 @@ button { color: inherit; }
   .app-shell { padding-top: 22px; padding-bottom: 40px; }
   .page-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
   .page-heading h1 { font-size: 21px; }
+  .list-tools { width: 100%; align-items: flex-start; justify-content: space-between; }
+  .tag-filter { flex: 1 1 150px; }
+  .tag-filter select { min-width: 0; flex: 1; }
   .node-grid { grid-template-columns: 1fr; }
-  .node-card { min-height: 318px; }
+  .node-card { min-height: 343px; }
   .detail-head { gap: 10px; }
   .detail-title h1 { font-size: 19px; line-height: 26px; }
   .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -341,6 +363,7 @@ button { color: inherit; }
   .node-form { grid-template-columns: 1fr; }
   .field, .field-wide { grid-column: 1; }
   .install-result-head { align-items: flex-start; flex-direction: column; }
+  .tag-input-grid { grid-template-columns: 1fr; }
   .gpu-section .data-table { min-width: 0; }
   .gpu-section .data-table thead { display: none; }
   .gpu-section .data-table tbody { display: grid; gap: 10px; padding: 10px; }

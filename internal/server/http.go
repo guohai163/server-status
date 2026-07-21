@@ -35,6 +35,7 @@ type dataStore interface {
 	ListNodes(context.Context) ([]store.NodeSummary, error)
 	GetNode(context.Context, string) (store.NodeDetail, error)
 	SetPrimaryNetworkInterface(context.Context, string, string) error
+	UpdateNodeTags(context.Context, string, []string) error
 	GetNodeHistory(context.Context, string, string) (store.NodeHistory, error)
 }
 
@@ -58,6 +59,7 @@ func NewAPI(database dataStore, adminToken string, logger *slog.Logger, releaseC
 	api.mux.HandleFunc("GET /api/v1/admin/nodes", api.requireAdmin(api.listNodes))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes/{nodeID}", api.requireAdmin(api.getNode))
 	api.mux.HandleFunc("PUT /api/v1/admin/nodes/{nodeID}/primary-network-interface", api.requireAdmin(api.setPrimaryNetworkInterface))
+	api.mux.HandleFunc("PUT /api/v1/admin/nodes/{nodeID}/tags", api.requireAdmin(api.updateNodeTags))
 	api.mux.HandleFunc("GET /agent/releases/{version}/{asset}", api.releaseAsset)
 	api.registerWebRoutes()
 	return api
@@ -188,6 +190,63 @@ func (api *API) getNode(response http.ResponseWriter, request *http.Request) {
 
 type primaryNetworkInterfaceInput struct {
 	InterfaceID string `json:"interface_id"`
+}
+
+type nodeTagsInput struct {
+	Tags []string `json:"tags"`
+}
+
+func normalizeNodeTags(tags []string) ([]string, error) {
+	if len(tags) > 5 {
+		return nil, errors.New("a node can have at most 5 tags")
+	}
+	normalized := make([]string, 0, len(tags))
+	seen := make(map[string]struct{}, len(tags))
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			return nil, errors.New("tags cannot be empty")
+		}
+		if len([]rune(tag)) > 32 {
+			return nil, errors.New("each tag must be at most 32 characters")
+		}
+		key := strings.ToLower(tag)
+		if _, exists := seen[key]; exists {
+			return nil, errors.New("tags must be unique")
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, tag)
+	}
+	return normalized, nil
+}
+
+func (api *API) updateNodeTags(response http.ResponseWriter, request *http.Request) {
+	nodeID := request.PathValue("nodeID")
+	if !report.ValidUUID(nodeID) {
+		writeError(response, http.StatusBadRequest, "invalid node id")
+		return
+	}
+	var input nodeTagsInput
+	if err := decodeJSON(response, request, &input); err != nil {
+		writeError(response, http.StatusBadRequest, err.Error())
+		return
+	}
+	tags, err := normalizeNodeTags(input.Tags)
+	if err != nil {
+		writeError(response, http.StatusBadRequest, err.Error())
+		return
+	}
+	ctx, cancel := contextWithTimeout(request, 10*time.Second)
+	defer cancel()
+	if err := api.store.UpdateNodeTags(ctx, nodeID, tags); errors.Is(err, store.ErrNotFound) {
+		writeError(response, http.StatusNotFound, "node not found")
+		return
+	} else if err != nil {
+		api.logger.Error("update node tags failed", "node_id", nodeID, "error", err)
+		writeError(response, http.StatusInternalServerError, "cannot update node tags")
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"tags": tags})
 }
 
 // setPrimaryNetworkInterface changes the interface used for the node card IP and IP ordering.

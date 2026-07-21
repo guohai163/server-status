@@ -18,6 +18,12 @@
   const networkPreferenceToken = document.getElementById("network-preference-token");
   const networkPreferenceError = document.getElementById("network-preference-error");
   const saveNetworkPreference = document.getElementById("save-network-preference");
+  const tagDialog = document.getElementById("tag-dialog");
+  const tagForm = document.getElementById("tag-form");
+  const tagInputs = Array.from(tagDialog.querySelectorAll("[data-tag-input]"));
+  const tagAdminToken = document.getElementById("tag-admin-token");
+  const tagError = document.getElementById("tag-error");
+  const saveTags = document.getElementById("save-tags");
   const ranges = ["1h", "6h", "24h", "7d", "30d", "90d"];
   const adminTokenStorageKey = "server-status.admin-token";
   const adminTokenLifetimeMs = 30 * 24 * 60 * 60 * 1000;
@@ -25,16 +31,20 @@
   let nodes = [];
   let selectedRange = "24h";
   let currentDetail = null;
-  let currentHistoryPoints = [];
+  let currentHistory = { points: [], gpus: [] };
+  let currentGPUDevices = [];
   let refreshTimer = null;
   let resizeFrame = null;
   let cachedAdminToken = storedAdminToken.token;
   let cachedAdminTokenExpiresAt = storedAdminToken.expiresAt;
   let pendingNetworkPreference = null;
+  let pendingTagNodeID = null;
+  let selectedTag = "";
 
   const chartColorVariables = {
     cpu: "--chart-cpu", memory: "--chart-memory", disk: "--chart-disk",
-    read: "--chart-read", write: "--chart-write", rx: "--chart-rx", tx: "--chart-tx"
+    read: "--chart-read", write: "--chart-write", rx: "--chart-rx", tx: "--chart-tx",
+    gpu: "--chart-cpu", gpuMemory: "--chart-memory"
   };
 
   function themeColor(variable) {
@@ -176,6 +186,11 @@
     return `<div class="metric-row"><div class="metric-row-head"><span>${label}</span><strong>${formatPercent(percent)}</strong></div><div class="progress"><i class="${usageClass(percent)}" style="width:${percent}%"></i></div></div>`;
   }
 
+  function tagBadges(tags, className) {
+    const values = (tags || []).slice(0, 5);
+    return `<span class="${className}">${values.map((tag) => `<span class="tag-badge">${escapeHTML(tag)}</span>`).join("")}</span>`;
+  }
+
   function nodeCard(node) {
     const memoryPercent = node.memory_usage_percent || 0;
     const addressAndOS = `${node.primary_ip || "未获取 IP"} - ${formatOS(node)}`;
@@ -185,7 +200,7 @@
     const nvidiaIcon = node.has_nvidia_gpu ? '<img class="nvidia-icon" src="/assets/nvidia.svg" alt="" title="NVIDIA GPU">' : "";
     return `<button class="node-card" type="button" data-node-id="${escapeHTML(node.node_id)}">
       <div class="card-head">
-        <div class="card-title"><strong class="card-name">${physicalIcon}${nvidiaIcon}<span>${escapeHTML(displayName(node))}</span></strong><span class="card-meta">${escapeHTML(addressAndOS)}</span></div>
+        <div class="card-title"><strong class="card-name">${physicalIcon}${nvidiaIcon}<span>${escapeHTML(displayName(node))}</span></strong><span class="card-meta">${escapeHTML(addressAndOS)}</span>${tagBadges(node.tags, "card-tags")}</div>
         <span class="status-label" aria-label="${escapeHTML(`${status}，Agent ${agentVersion}`)}" title="${escapeHTML(`${status} · Agent ${agentVersion}`)}"><i class="status-dot ${escapeHTML(node.status)}" aria-hidden="true"></i><span class="agent-version">${escapeHTML(agentVersion)}</span></span>
       </div>
       <div class="metric-list">
@@ -233,26 +248,42 @@
 
   function renderList() {
     currentDetail = null;
-    const counts = nodes.reduce((result, node) => {
+    const tagLabels = new Map();
+    nodes.flatMap((node) => node.tags || []).forEach((tag) => {
+      const key = tag.toLowerCase();
+      if (!tagLabels.has(key)) tagLabels.set(key, tag);
+    });
+    const availableTags = Array.from(tagLabels, ([key, label]) => ({ key, label })).sort((left, right) => left.label.localeCompare(right.label, "zh-CN", { sensitivity: "base" }));
+    if (selectedTag && !tagLabels.has(selectedTag)) selectedTag = "";
+    const visibleNodes = selectedTag ? nodes.filter((node) => (node.tags || []).some((tag) => tag.toLowerCase() === selectedTag)) : nodes;
+    const counts = visibleNodes.reduce((result, node) => {
       result[node.status] = (result[node.status] || 0) + 1;
       return result;
     }, {});
-    const groups = groupNodesBySubnet(nodes).map((group, index) => `<section class="node-group" aria-labelledby="node-group-${index}">
+    const groups = groupNodesBySubnet(visibleNodes).map((group, index) => `<section class="node-group" aria-labelledby="node-group-${index}">
       <div class="node-group-head">
         <h2 id="node-group-${index}"><code>${escapeHTML(group.label)}</code></h2>
         <span>${group.nodes.length} 台</span>
       </div>
       <div class="node-grid">${group.nodes.map(nodeCard).join("")}</div>
     </section>`).join("");
+    const tagOptions = availableTags.map((tag) => `<option value="${escapeHTML(tag.key)}"${tag.key === selectedTag ? " selected" : ""}>${escapeHTML(tag.label)}</option>`).join("");
     app.innerHTML = `<div class="page-heading">
-      <div><h1>节点状态</h1><p>${nodes.length} 台服务器的最新一分钟快照</p></div>
-      <div class="status-counts">
+      <div><h1>节点状态</h1><p>${selectedTag ? `${visibleNodes.length} / ${nodes.length}` : nodes.length} 台服务器的最新一分钟快照</p></div>
+      <div class="list-tools">
+        <label class="tag-filter"><span>Tag</span><select id="tag-filter"${availableTags.length ? "" : " disabled"}><option value="">全部</option>${tagOptions}</select></label>
+        <div class="status-counts">
         <span class="status-count"><i class="status-dot online"></i>在线 <strong>${counts.online || 0}</strong></span>
         <span class="status-count"><i class="status-dot offline"></i>离线 <strong>${counts.offline || 0}</strong></span>
         ${counts.pending ? `<span class="status-count"><i class="status-dot pending"></i>待安装 <strong>${counts.pending}</strong></span>` : ""}
         ${counts.disabled ? `<span class="status-count"><i class="status-dot disabled"></i>禁用 <strong>${counts.disabled}</strong></span>` : ""}
+        </div>
       </div>
-    </div>${nodes.length ? `<div class="node-groups">${groups}</div>` : '<div class="empty-state"><strong>暂无节点</strong><span>尚未创建监控节点</span></div>'}`;
+    </div>${visibleNodes.length ? `<div class="node-groups">${groups}</div>` : `<div class="empty-state"><strong>${nodes.length ? "没有匹配的节点" : "暂无节点"}</strong></div>`}`;
+    document.getElementById("tag-filter").addEventListener("change", (event) => {
+      selectedTag = event.target.value;
+      renderList();
+    });
     app.querySelectorAll("[data-node-id]").forEach((card) => card.addEventListener("click", () => {
       location.hash = `node/${card.dataset.nodeId}`;
     }));
@@ -282,6 +313,7 @@
 
   function renderDetail(detail, history) {
     const node = detail.node;
+    currentGPUDevices = detail.gpus || [];
     const alias = node.display_name && node.hostname !== "pending-registration" && node.hostname !== node.display_name && node.hostname !== node.primary_ip
       ? `<span>${escapeHTML(node.hostname)}</span>` : "";
     const lastReport = node.status === "pending" ? "等待首次上报" : `最近上报 ${formatTime(node.last_seen_at, true)}`;
@@ -292,7 +324,7 @@
         <span class="status-label"><i class="status-dot ${escapeHTML(node.status)}"></i>${escapeHTML(statusText(node.status))}</span>
         <code>${escapeHTML(node.primary_ip || "未获取 IP")}</code>${alias}
         <span>${lastReport}</span>
-      </div></div>
+      </div><div class="detail-tags">${tagBadges(node.tags, "detail-tag-list")}<button class="tag-edit-button" type="button" data-edit-tags title="编辑 Tag" aria-label="编辑 Tag">+</button></div></div>
     </div>
     <div class="metric-strip">
       ${metricTile("CPU", formatPercent(node.cpu_usage_percent), `${node.cpu_physical_core_count} 核 / ${node.cpu_logical_thread_count} 线程`)}
@@ -302,11 +334,12 @@
       ${metricTile("运行时间", formatDuration(node.uptime_seconds), `${escapeHTML(node.os_name)} ${escapeHTML(node.os_version)}`)}
     </div>
     ${gpuSection(detail.gpus)}
-    <section class="section"><div class="section-head"><div><h2>历史数据</h2><p>${history.resolution === "hour" ? "小时汇总" : "分钟原始指标"}</p></div><div class="segmented" aria-label="历史时间范围">${rangeButtons}</div></div>
+    <section class="section"><div class="section-head"><div><h2>历史数据</h2><p data-history-subtitle>${history.resolution === "hour" ? "小时汇总" : "分钟原始指标"}</p></div><div class="segmented" aria-label="历史时间范围">${rangeButtons}</div></div>
       <div class="chart-grid">
         ${chartPanel("resource-chart", "资源使用率", [["CPU", chartColorVariables.cpu], ["内存", chartColorVariables.memory], ["磁盘", chartColorVariables.disk]])}
         ${chartPanel("io-chart", "吞吐速率", [["磁盘读", chartColorVariables.read], ["磁盘写", chartColorVariables.write], ["网络收", chartColorVariables.rx], ["网络发", chartColorVariables.tx]])}
       </div>
+      <div class="chart-grid gpu-history-grid" id="gpu-history-grid"></div>
     </section>
     <section class="section"><div class="section-head"><div><h2>硬件信息</h2><p>${escapeHTML(node.architecture)} · Agent ${escapeHTML(node.agent_version)}</p></div></div>
       <div class="info-grid">
@@ -318,11 +351,12 @@
     </section>
     <section class="section"><div class="section-head"><div><h2>网络接口</h2><p>地址、链路状态与当前吞吐</p></div></div>${networkTable(detail.network)}</section>`;
     app.querySelector(".back-button").addEventListener("click", () => { location.hash = ""; });
+    app.querySelector("[data-edit-tags]").addEventListener("click", () => openTagDialog(node));
     app.querySelectorAll("[data-range]").forEach((button) => button.addEventListener("click", () => changeRange(node.node_id, button.dataset.range)));
     app.querySelectorAll("[data-primary-interface-id]").forEach((button) => button.addEventListener("click", () => {
       selectPrimaryNetworkInterface(node.node_id, button.dataset.primaryInterfaceId, button.dataset.interfaceName, button);
     }));
-    renderCharts(history.points || []);
+    renderCharts(history);
   }
 
   function chartPanel(id, title, items) {
@@ -336,14 +370,15 @@
     app.querySelectorAll("[data-range]").forEach((button) => button.classList.toggle("active", button.dataset.range === range));
     try {
       const history = await apiFetch(`/api/v1/nodes/${encodeURIComponent(nodeID)}/history?range=${range}`);
-      const subtitle = app.querySelector(".section-head p");
+      const subtitle = app.querySelector("[data-history-subtitle]");
       if (subtitle) subtitle.textContent = history.resolution === "hour" ? "小时汇总" : "分钟原始指标";
-      renderCharts(history.points || []);
+      renderCharts(history);
     } catch (error) { renderError(error, true); }
   }
 
-  function renderCharts(points) {
-    currentHistoryPoints = points;
+  function renderCharts(history) {
+    currentHistory = history || { points: [], gpus: [] };
+    const points = currentHistory.points || [];
     drawLineChart(document.getElementById("resource-chart"), points, [
       { label: "CPU", key: "cpu_usage_percent", color: themeColor(chartColorVariables.cpu) },
       { label: "内存", key: "memory_usage_percent", color: themeColor(chartColorVariables.memory) },
@@ -355,6 +390,41 @@
       { label: "网络收", key: "network_rx_bytes_per_second", color: themeColor(chartColorVariables.rx) },
       { label: "网络发", key: "network_tx_bytes_per_second", color: themeColor(chartColorVariables.tx) }
     ], false);
+    renderGPUHistoryCharts(currentHistory.gpus || []);
+  }
+
+  function renderGPUHistoryCharts(historySeries) {
+    const grid = document.getElementById("gpu-history-grid");
+    if (!grid) return;
+    const devices = [];
+    const positions = new Map();
+    currentGPUDevices.forEach((gpu) => {
+      positions.set(gpu.gpu_device_id, devices.length);
+      devices.push({ ...gpu, points: [] });
+    });
+    historySeries.forEach((gpu) => {
+      const position = positions.get(gpu.gpu_device_id);
+      if (position == null) {
+        positions.set(gpu.gpu_device_id, devices.length);
+        devices.push(gpu);
+      } else {
+        devices[position] = { ...devices[position], ...gpu };
+      }
+    });
+    grid.innerHTML = devices.map((gpu, index) => chartPanel(
+      `gpu-history-chart-${index}`,
+      `GPU ${escapeHTML(gpu.index)} · ${escapeHTML(gpu.model_name)}`,
+      [["GPU 使用率", chartColorVariables.gpu], ["显存使用率", chartColorVariables.gpuMemory]]
+    )).join("");
+    devices.forEach((gpu, index) => drawLineChart(
+      document.getElementById(`gpu-history-chart-${index}`),
+      gpu.points || [],
+      [
+        { label: "GPU 使用率", key: "utilization_percent", color: themeColor(chartColorVariables.gpu) },
+        { label: "显存使用率", key: "memory_usage_percent", color: themeColor(chartColorVariables.gpuMemory) }
+      ],
+      true
+    ));
   }
 
   function drawLineChart(canvas, points, series, percent) {
@@ -549,6 +619,64 @@
     }
   }
 
+  function openTagDialog(node) {
+    pendingTagNodeID = node.node_id;
+    tagInputs.forEach((input, index) => { input.value = (node.tags || [])[index] || ""; });
+    tagAdminToken.value = currentAdminToken();
+    tagError.hidden = true;
+    tagError.textContent = "";
+    tagDialog.showModal();
+    tagInputs[0].focus();
+  }
+
+  function closeTagDialog() {
+    tagDialog.close();
+  }
+
+  async function updateNodeTags(nodeID, tags, token) {
+    const response = await fetch(`/api/v1/admin/nodes/${encodeURIComponent(nodeID)}/tags`, {
+      method: "PUT",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ tags })
+    });
+    if (!response.ok) {
+      let message = `保存失败 (${response.status})`;
+      try { message = (await response.json()).error || message; } catch (_) { /* response is not JSON */ }
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
+    }
+    return response.json();
+  }
+
+  async function submitTags(event) {
+    event.preventDefault();
+    if (!tagForm.reportValidity() || !pendingTagNodeID) return;
+    const tags = tagInputs.map((input) => input.value.trim()).filter(Boolean);
+    const token = tagAdminToken.value.trim();
+    tagError.hidden = true;
+    saveTags.disabled = true;
+    saveTags.textContent = "正在保存";
+    try {
+      await updateNodeTags(pendingTagNodeID, tags, token);
+      rememberAdminToken(token);
+      const nodeID = pendingTagNodeID;
+      closeTagDialog();
+      await loadDetail(nodeID);
+    } catch (error) {
+      if (error.status === 401) clearStoredAdminToken();
+      tagError.textContent = error.status === 401 ? "Admin Token 无效" : error.message;
+      tagError.hidden = false;
+    } finally {
+      saveTags.disabled = false;
+      saveTags.textContent = "保存";
+    }
+  }
+
   function renderError(error, withBack) {
     app.innerHTML = `<div class="error-state"><strong>数据读取失败</strong><span>${escapeHTML(error.message)}</span>${withBack ? '<button class="back-button" type="button" title="返回节点列表" aria-label="返回节点列表">←</button>' : ""}</div>`;
     const back = app.querySelector(".back-button");
@@ -692,14 +820,24 @@
     networkPreferenceError.textContent = "";
   });
   networkPreferenceForm.addEventListener("submit", submitNetworkPreference);
+  document.getElementById("close-tag-dialog").addEventListener("click", closeTagDialog);
+  tagDialog.querySelector("[data-close-tag-dialog]").addEventListener("click", closeTagDialog);
+  tagDialog.addEventListener("close", () => {
+    pendingTagNodeID = null;
+    tagInputs.forEach((input) => { input.value = ""; });
+    tagAdminToken.value = "";
+    tagError.hidden = true;
+    tagError.textContent = "";
+  });
+  tagForm.addEventListener("submit", submitTags);
   window.addEventListener("hashchange", route);
   window.addEventListener("resize", () => {
     if (!currentDetail) return;
     if (resizeFrame) cancelAnimationFrame(resizeFrame);
-    resizeFrame = requestAnimationFrame(() => renderCharts(currentHistoryPoints));
+    resizeFrame = requestAnimationFrame(() => renderCharts(currentHistory));
   });
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-    if (currentDetail) renderCharts(currentHistoryPoints);
+    if (currentDetail) renderCharts(currentHistory);
   });
   route();
 })();

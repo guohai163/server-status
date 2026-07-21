@@ -25,7 +25,7 @@ curl http://10.12.54.200:8080/readyz
 
 数据库使用专用登录角色 `server_status_app`，该角色只继承 `server_status_writer`，没有超级用户、建库或建角色权限。
 
-升级到包含 GPU 监控的版本前，使用迁移账号执行 `db/migrations/V005__nvidia_gpu_metrics.sql`。中央服务启动时只校验 V005 是否存在，不会使用运行时 writer 账号自动修改 schema。
+升级时使用迁移账号依次执行 `db/migrations/V005__nvidia_gpu_metrics.sql`、`db/migrations/V006__node_tags.sql` 和 `db/migrations/V007__gpu_history_metrics.sql`。中央服务启动时只校验 V007 是否存在，不会使用运行时 writer 账号自动修改 schema。
 
 ## 节点 Agent
 

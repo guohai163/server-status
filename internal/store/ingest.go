@@ -140,6 +140,9 @@ func (store *Store) Ingest(ctx context.Context, auth NodeAuth, payload report.Re
 	if _, err := tx.Exec(ctx, `DELETE FROM monitoring.network_metric_samples WHERE bucket_at = $1 AND node_id = $2::uuid`, bucketAt, auth.NodeID); err != nil {
 		return fmt.Errorf("replace network samples: %w", err)
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM monitoring.gpu_metric_samples WHERE bucket_at = $1 AND node_id = $2::uuid`, bucketAt, auth.NodeID); err != nil {
+		return fmt.Errorf("replace GPU samples: %w", err)
+	}
 	for _, metric := range payload.Metrics.Filesystems {
 		filesystemID, ok := filesystemIDs[metric.FilesystemKey]
 		if !ok {
@@ -183,26 +186,18 @@ func (store *Store) Ingest(ctx context.Context, auth NodeAuth, payload report.Re
 		}
 	}
 	for _, metric := range payload.Metrics.GPUs {
-		gpuID, ok := gpuIDs[metric.GPUKey]
+		gpu, ok := gpuIDs[metric.GPUKey]
 		if !ok {
 			return fmt.Errorf("%w: GPU %q", ErrInvalidResource, metric.GPUKey)
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO monitoring.gpu_current_metrics (
-				node_id, gpu_id, bucket_at, collected_at, received_at,
-				utilization_percent, memory_used_bytes, updated_at
-			) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
-			ON CONFLICT (node_id, gpu_id) DO UPDATE SET
-				bucket_at = EXCLUDED.bucket_at,
-				collected_at = EXCLUDED.collected_at,
-				received_at = EXCLUDED.received_at,
-				utilization_percent = EXCLUDED.utilization_percent,
-				memory_used_bytes = EXCLUDED.memory_used_bytes,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE EXCLUDED.bucket_at >= gpu_current_metrics.bucket_at
-		`, auth.NodeID, gpuID, bucketAt, payload.CollectedAt.UTC(), receivedAt,
-			metric.UtilizationPercent, i64(metric.MemoryUsedBytes)); err != nil {
-			return fmt.Errorf("upsert GPU metric %q: %w", metric.GPUKey, err)
+			INSERT INTO monitoring.gpu_metric_samples (
+				bucket_at, node_id, gpu_id, utilization_percent,
+				memory_total_bytes, memory_used_bytes
+			) VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6)
+		`, bucketAt, auth.NodeID, gpu.ID, metric.UtilizationPercent,
+			gpu.MemoryTotalBytes, i64(metric.MemoryUsedBytes)); err != nil {
+			return fmt.Errorf("insert GPU sample %q: %w", metric.GPUKey, err)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -530,22 +525,28 @@ func activeInterfaceIDs(ctx context.Context, tx pgx.Tx, nodeID string) (map[stri
 	return result, rows.Err()
 }
 
-func activeGPUIDs(ctx context.Context, tx pgx.Tx, nodeID string) (map[string]string, error) {
+type activeGPU struct {
+	ID               string
+	MemoryTotalBytes int64
+}
+
+func activeGPUIDs(ctx context.Context, tx pgx.Tx, nodeID string) (map[string]activeGPU, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT hardware_key, id::text FROM monitoring.gpu_devices
+		SELECT hardware_key, id::text, memory_total_bytes FROM monitoring.gpu_devices
 		WHERE node_id = $1::uuid AND removed_at IS NULL
 	`, nodeID)
 	if err != nil {
 		return nil, fmt.Errorf("query active GPUs: %w", err)
 	}
 	defer rows.Close()
-	result := make(map[string]string)
+	result := make(map[string]activeGPU)
 	for rows.Next() {
-		var key, id string
-		if err := rows.Scan(&key, &id); err != nil {
+		var key string
+		var gpu activeGPU
+		if err := rows.Scan(&key, &gpu.ID, &gpu.MemoryTotalBytes); err != nil {
 			return nil, fmt.Errorf("scan active GPU: %w", err)
 		}
-		result[key] = id
+		result[key] = gpu
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate active GPUs: %w", err)
