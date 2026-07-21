@@ -166,6 +166,12 @@ INSERT INTO monitoring.network_addresses (
      '80000000-0000-0000-0000-000000000001', '2001:db8::10/64', 'global',
      CURRENT_TIMESTAMP - INTERVAL '1 day', CURRENT_TIMESTAMP);
 
+INSERT INTO monitoring.node_network_preferences (node_id, interface_id)
+VALUES (
+    '10000000-0000-0000-0000-000000000001',
+    '80000000-0000-0000-0000-000000000001'
+);
+
 INSERT INTO monitoring.node_metric_samples (
     bucket_at, node_id, collected_at, interval_seconds,
     cpu_usage_percent, load_1, load_5, load_15,
@@ -324,6 +330,15 @@ BEGIN
         RAISE EXCEPTION 'IPv4/IPv6 aggregation is incorrect: %', v_count;
     END IF;
 
+    IF NOT EXISTS (
+        SELECT 1
+          FROM monitoring.node_network_preferences
+         WHERE node_id = '10000000-0000-0000-0000-000000000001'
+           AND interface_id = '80000000-0000-0000-0000-000000000001'
+    ) THEN
+        RAISE EXCEPTION 'dashboard network preference was not persisted';
+    END IF;
+
     IF EXISTS (
         SELECT 1 FROM monitoring.node_api_tokens
          WHERE token_digest = decode(repeat('cd', 32), 'hex')
@@ -369,6 +384,17 @@ BEGIN
             '70000000-0000-0000-0000-000000000001', 1000, 500, 400
         );
         RAISE EXCEPTION 'cross-node filesystem reference was accepted';
+    EXCEPTION WHEN foreign_key_violation THEN
+        NULL;
+    END;
+
+    BEGIN
+        INSERT INTO monitoring.node_network_preferences (node_id, interface_id)
+        VALUES (
+            '10000000-0000-0000-0000-000000000002',
+            '80000000-0000-0000-0000-000000000001'
+        );
+        RAISE EXCEPTION 'cross-node network preference was accepted';
     EXCEPTION WHEN foreign_key_violation THEN
         NULL;
     END;
@@ -456,6 +482,12 @@ BEGIN
     IF NOT has_table_privilege('server_status_writer', 'monitoring.node_metric_samples', 'INSERT') THEN
         RAISE EXCEPTION 'writer role lacks INSERT on raw samples';
     END IF;
+    IF NOT has_table_privilege('server_status_writer', 'monitoring.node_network_preferences', 'INSERT') THEN
+        RAISE EXCEPTION 'writer role lacks INSERT on dashboard network preferences';
+    END IF;
+    IF has_table_privilege('server_status_reader', 'monitoring.node_network_preferences', 'INSERT') THEN
+        RAISE EXCEPTION 'reader role can modify dashboard network preferences';
+    END IF;
     IF has_table_privilege('server_status_writer', 'monitoring.schema_migrations', 'INSERT') THEN
         RAISE EXCEPTION 'writer role can modify migration history';
     END IF;
@@ -474,6 +506,20 @@ INSERT INTO monitoring.nodes (
     '20000000-0000-0000-0000-000000000003',
     'verify-writer-role', 'Ubuntu', 'x86_64', '0.1.0',
     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+);
+
+INSERT INTO monitoring.network_interfaces (
+    id, node_id, interface_key, interface_name, first_seen_at, last_seen_at
+) VALUES (
+    '80000000-0000-0000-0000-000000000003',
+    '10000000-0000-0000-0000-000000000003',
+    'writer-eth0', 'eth0', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+);
+
+INSERT INTO monitoring.node_network_preferences (node_id, interface_id)
+VALUES (
+    '10000000-0000-0000-0000-000000000003',
+    '80000000-0000-0000-0000-000000000003'
 );
 
 INSERT INTO monitoring.node_metric_samples (
@@ -498,6 +544,14 @@ BEGIN
            AND cpu_usage_percent = 12.5
     ) THEN
         RAISE EXCEPTION 'writer role insert did not execute the current-metrics trigger';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+          FROM monitoring.node_network_preferences
+         WHERE node_id = '10000000-0000-0000-0000-000000000003'
+           AND interface_id = '80000000-0000-0000-0000-000000000003'
+    ) THEN
+        RAISE EXCEPTION 'writer role could not persist dashboard network preference';
     END IF;
 END
 $writer_runtime_assertions$;

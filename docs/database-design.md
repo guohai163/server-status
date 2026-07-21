@@ -20,6 +20,8 @@ erDiagram
     NODES ||--o{ BLOCK_DEVICES : owns
     NODES ||--o{ FILESYSTEMS : mounts
     NODES ||--o{ NETWORK_INTERFACES : owns
+    NODES ||--o| NODE_NETWORK_PREFERENCES : configures
+    NETWORK_INTERFACES ||--o| NODE_NETWORK_PREFERENCES : selected_by
     NETWORK_INTERFACES ||--o{ NETWORK_ADDRESSES : has
     NODES ||--o{ NODE_METRIC_SAMPLES : reports
     NODE_METRIC_SAMPLES ||--o{ FILESYSTEM_METRIC_SAMPLES : contains
@@ -54,6 +56,7 @@ erDiagram
 | `filesystems` | 文件系统稳定标识、设备名、类型和挂载点 |
 | `network_interfaces` | 网卡稳定标识、名称、MAC、MTU 和链路速率 |
 | `network_addresses` | PostgreSQL `inet` 格式的 IPv4/IPv6 地址及作用域 |
+| `node_network_preferences` | 首页卡片 IP 来源网卡；每个节点最多选择一个 |
 
 每张清单表使用稳定 key 加 `first_seen_at`、`last_seen_at`、`removed_at` 记录观察周期。当前有效记录有局部唯一索引；设备移除后，相同 key 再次出现会创建新的历史记录。
 
@@ -89,6 +92,8 @@ erDiagram
 - `v_filesystem_status`：所有有效挂载点的最新容量和 inode 使用情况。
 - `v_network_status`：所有有效网卡、IPv4/IPv6 地址、链路状态、当前流量和错误计数。
 
+首页节点查询优先从 `node_network_preferences` 指定的有效网卡选择地址，再按地址作用域、IPv4/IPv6 family 和 PostgreSQL `inet` 值确定该网卡内的展示 IP。未设置偏好，或所选网卡被移除、暂无地址时，查询回退到所有有效网卡的自动选址；节点列表按最终展示 IP 的 `inet` 值排序，无 IP 的节点排在最后。
+
 历史趋势必须携带 `node_id`/资源 ID 和时间范围，以使用分区裁剪及 `(node_id, resource_id, time)` 索引。
 
 ## 定时维护
@@ -119,13 +124,14 @@ SELECT monitoring.rollup_hour($1::timestamptz);
 
 ## 部署与验证
 
-迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总。在连接信息由环境或 `.pgpass` 提供的前提下执行：
+迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好。在连接信息由环境或 `.pgpass` 提供的前提下执行：
 
 ```bash
 psql -v ON_ERROR_STOP=1 -f db/migrations/V001__monitoring_schema.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V002__safe_partition_retention.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V003__disk_io_metrics.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V004__primary_network_interface.sql
 psql -v ON_ERROR_STOP=1 -f db/verify/V001__verify.sql
 ```
 
-验收脚本会覆盖节点、令牌、硬件历史、IPv4/IPv6、分钟指标、current 触发器、幂等更新、约束、小时汇总、角色权限和查询计划，最后执行 `ROLLBACK`，不会保留验证数据。
+验收脚本会覆盖节点、令牌、硬件历史、IPv4/IPv6、首页网卡偏好、分钟指标、current 触发器、幂等更新、跨节点约束、小时汇总、角色权限和查询计划，最后执行 `ROLLBACK`，不会保留验证数据。

@@ -65,6 +65,26 @@
       </div>
     </div>
   </dialog>
+  <dialog id="network-preference-dialog" class="preference-dialog" aria-labelledby="network-preference-title">
+    <div class="dialog-head">
+      <div>
+        <h2 id="network-preference-title">选择首页 IP</h2>
+        <p id="network-preference-context"></p>
+      </div>
+      <button id="close-network-preference-dialog" class="icon-button" type="button" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <form id="network-preference-form" class="preference-form">
+      <label class="field">
+        <span>Admin Token</span>
+        <input id="network-preference-token" name="admin_token" type="password" required autocomplete="off" spellcheck="false">
+      </label>
+      <p id="network-preference-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="secondary-button" type="button" data-close-network-preference>取消</button>
+        <button id="save-network-preference" class="primary-button" type="submit">确认选择</button>
+      </div>
+    </form>
+  </dialog>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

@@ -138,6 +138,7 @@ docker pull ghcr.io/guohai163/server-status-central:0.3.2
 psql -v ON_ERROR_STOP=1 -f db/migrations/V001__monitoring_schema.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V002__safe_partition_retention.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V003__disk_io_metrics.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V004__primary_network_interface.sql
 ```
 
 中央服务应使用继承 `server_status_writer` 的独立登录角色，不要使用 PostgreSQL 超级用户。
@@ -150,7 +151,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V003__disk_io_metrics.sql
 SERVER_STATUS_DATABASE_URL=postgres://server_status_app:password@postgres:5432/server_status_db?sslmode=disable
 SERVER_STATUS_ADMIN_TOKEN=至少32位随机字符串
 SERVER_STATUS_LISTEN_ADDR=:8080
-SERVER_STATUS_CENTRAL_IMAGE=ghcr.io/guohai163/server-status-central:0.4.4
+SERVER_STATUS_CENTRAL_IMAGE=ghcr.io/guohai163/server-status-central:0.6.0
 ```
 
 Admin Token 只用于节点注册、令牌轮换和管理员查询。
@@ -171,7 +172,7 @@ curl http://127.0.0.1:8080/readyz
 
 中心容器使用非 root 用户、只读根文件系统、移除全部 capabilities，并配置 `unless-stopped` 自动恢复。Compose 会挂载独立的 `agent_release_cache` 持久卷，用于缓存 Agent Release 资产。
 
-部署完成后直接访问 `http://中心节点地址:8080/`。Web 看板不需要登录：首屏以卡片显示所有节点的机器名、IP、CPU、内存、磁盘使用率和磁盘读写速率；点击卡片进入硬件、文件系统、网卡和历史趋势详情。节点上报和管理接口仍分别使用 Node Token 与 Admin Token。
+部署完成后直接访问 `http://中心节点地址:8080/`。Web 看板不需要登录：首屏以卡片显示所有节点的机器名、IP、CPU、内存、磁盘使用率和磁盘读写速率；点击卡片进入硬件、文件系统、网卡和历史趋势详情。节点上报和管理接口仍分别使用 Node Token 与 Admin Token。浏览器在 Admin Token 成功通过鉴权后会将其保存到本地 30 天，期间添加节点和选择首页 IP 无需重复填写；过期或接口返回 401 时自动清除。
 
 ## 一个脚本部署 Agent
 
@@ -223,6 +224,7 @@ curl -fsSL 'https://中心节点/install-agent.sh' | sudo env \
 | `POST` | `/api/v1/admin/nodes` | Admin Token | 注册节点或轮换节点 Token |
 | `GET` | `/api/v1/admin/nodes` | Admin Token | 查询节点状态列表 |
 | `GET` | `/api/v1/admin/nodes/{node_id}` | Admin Token | 查询节点、文件系统和网卡详情 |
+| `PUT` | `/api/v1/admin/nodes/{node_id}/primary-network-interface` | Admin Token | 设置首页卡片 IP 使用的网络接口 |
 
 所有受保护接口使用：
 

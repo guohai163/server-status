@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.6.0 - 2026-07-21
+
+### Added
+- Let administrators select the network interface whose IP identifies each node on dashboard cards and controls IP-based node ordering.
+- Persist the selected interface with a PostgreSQL migration and expose an Admin Token-protected update endpoint.
+- Remember a successfully authenticated Admin Token in the browser for 30 days, clearing it when it expires or is rejected.
+
+### Changed
+- Extend database verification to cover network preferences, cross-node constraints, and runtime role permissions.
+
 ## v0.5.1 - 2026-07-21
 
 ### Changed

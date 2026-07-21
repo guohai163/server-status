@@ -67,6 +67,7 @@ type FilesystemStatus struct {
 type NetworkStatus struct {
 	InterfaceID     string     `json:"interface_id"`
 	Name            string     `json:"name"`
+	IsPrimary       bool       `json:"is_primary"`
 	MACAddress      string     `json:"mac_address,omitempty"`
 	MTU             int        `json:"mtu"`
 	LinkSpeedMbps   int        `json:"link_speed_mbps"`
@@ -138,7 +139,7 @@ type NodeHistory struct {
 }
 
 func (store *Store) ListNodes(ctx context.Context) ([]NodeSummary, error) {
-	rows, err := store.pool.Query(ctx, nodeSummarySQL+` ORDER BY status.hostname`)
+	rows, err := store.pool.Query(ctx, nodeSummarySQL+nodeListOrderSQL)
 	if err != nil {
 		return nil, fmt.Errorf("query nodes: %w", err)
 	}
@@ -192,6 +193,12 @@ func (store *Store) GetNode(ctx context.Context, nodeID string) (NodeDetail, err
 	}, nil
 }
 
+const nodeListOrderSQL = `
+	 ORDER BY CASE WHEN primary_address.is_preferred THEN primary_address.sort_address
+	               ELSE COALESCE(NULLIF(status.labels->>'` + primaryIPLabelKey + `', '')::inet, primary_address.sort_address)
+	          END NULLS LAST,
+	          status.hostname`
+
 const nodeSummarySQL = `
 	SELECT
 		status.node_id::text,
@@ -206,7 +213,8 @@ const nodeSummarySQL = `
 		COALESCE(status.labels->>'server_status.machine_type', ''),
 		status.last_seen_at,
 		status.status,
-		COALESCE(NULLIF(status.labels->>'server_status.primary_ip', ''), primary_address.address, ''),
+		COALESCE(CASE WHEN primary_address.is_preferred THEN primary_address.address END,
+		         NULLIF(status.labels->>'server_status.primary_ip', ''), primary_address.address, ''),
 		status.seconds_since_last_seen,
 		status.latest_bucket_at,
 		COALESCE(status.cpu_usage_percent, 0)::double precision,
@@ -241,12 +249,22 @@ const nodeSummarySQL = `
 		 WHERE cpu.node_id = status.node_id AND cpu.removed_at IS NULL
 	  ) cpu_detail ON true
 	  LEFT JOIN monitoring.node_current_metrics current_metric ON current_metric.node_id = status.node_id
+	  LEFT JOIN monitoring.node_network_preferences network_preference
+	    ON network_preference.node_id = status.node_id
 	  LEFT JOIN LATERAL (
-		SELECT host(address)::text AS address
-		  FROM monitoring.network_addresses
-		 WHERE node_id = status.node_id AND removed_at IS NULL
-		 ORDER BY CASE address_scope WHEN 'global' THEN 0 WHEN 'private' THEN 1 WHEN 'link' THEN 2 ELSE 3 END,
-		          family(address), address
+		SELECT host(network_address.address)::text AS address,
+		       network_address.address AS sort_address,
+		       network_interface.id = network_preference.interface_id AS is_preferred
+		  FROM monitoring.network_addresses network_address
+		  JOIN monitoring.network_interfaces network_interface
+		    ON network_interface.node_id = network_address.node_id
+		   AND network_interface.id = network_address.interface_id
+		 WHERE network_address.node_id = status.node_id
+		   AND network_address.removed_at IS NULL
+		   AND network_interface.removed_at IS NULL
+		 ORDER BY CASE WHEN network_interface.id = network_preference.interface_id THEN 0 ELSE 1 END,
+		          CASE network_address.address_scope WHEN 'global' THEN 0 WHEN 'private' THEN 1 WHEN 'link' THEN 2 ELSE 3 END,
+		          family(network_address.address), network_address.address
 		 LIMIT 1
 	  ) primary_address ON true
 	  LEFT JOIN LATERAL (
@@ -330,14 +348,18 @@ func (store *Store) listFilesystems(ctx context.Context, nodeID string) ([]Files
 
 func (store *Store) listNetwork(ctx context.Context, nodeID string) ([]NetworkStatus, error) {
 	rows, err := store.pool.Query(ctx, `
-		SELECT interface_id::text, interface_name, COALESCE(mac_address::text, ''),
-		       COALESCE(mtu, 0), COALESCE(link_speed_mbps, 0), COALESCE(addresses, ARRAY[]::text[]),
-		       bucket_at, COALESCE(link_up, false), COALESCE(rx_bytes_total, 0), COALESCE(tx_bytes_total, 0),
-		       COALESCE(rx_bits_per_second, 0)::double precision,
-		       COALESCE(tx_bits_per_second, 0)::double precision
-		  FROM monitoring.v_network_status
-		 WHERE node_id = $1::uuid
-		 ORDER BY interface_name
+		SELECT network.interface_id::text, network.interface_name,
+		       COALESCE(preference.interface_id = network.interface_id, false),
+		       COALESCE(network.mac_address::text, ''),
+		       COALESCE(network.mtu, 0), COALESCE(network.link_speed_mbps, 0), COALESCE(network.addresses, ARRAY[]::text[]),
+		       network.bucket_at, COALESCE(network.link_up, false), COALESCE(network.rx_bytes_total, 0), COALESCE(network.tx_bytes_total, 0),
+		       COALESCE(network.rx_bits_per_second, 0)::double precision,
+		       COALESCE(network.tx_bits_per_second, 0)::double precision
+		  FROM monitoring.v_network_status network
+		  LEFT JOIN monitoring.node_network_preferences preference
+		    ON preference.node_id = network.node_id
+		 WHERE network.node_id = $1::uuid
+		 ORDER BY network.interface_name
 	`, nodeID)
 	if err != nil {
 		return nil, fmt.Errorf("query network status: %w", err)
@@ -346,12 +368,34 @@ func (store *Store) listNetwork(ctx context.Context, nodeID string) ([]NetworkSt
 	result := make([]NetworkStatus, 0)
 	for rows.Next() {
 		var item NetworkStatus
-		if err := rows.Scan(&item.InterfaceID, &item.Name, &item.MACAddress, &item.MTU, &item.LinkSpeedMbps, &item.Addresses, &item.BucketAt, &item.LinkUp, &item.RXBytesTotal, &item.TXBytesTotal, &item.RXBitsPerSecond, &item.TXBitsPerSecond); err != nil {
+		if err := rows.Scan(&item.InterfaceID, &item.Name, &item.IsPrimary, &item.MACAddress, &item.MTU, &item.LinkSpeedMbps, &item.Addresses, &item.BucketAt, &item.LinkUp, &item.RXBytesTotal, &item.TXBytesTotal, &item.RXBitsPerSecond, &item.TXBitsPerSecond); err != nil {
 			return nil, fmt.Errorf("scan network status: %w", err)
 		}
 		result = append(result, item)
 	}
 	return result, rows.Err()
+}
+
+// SetPrimaryNetworkInterface stores the active interface whose address should identify and order a node on the dashboard.
+func (store *Store) SetPrimaryNetworkInterface(ctx context.Context, nodeID, interfaceID string) error {
+	command, err := store.pool.Exec(ctx, `
+		INSERT INTO monitoring.node_network_preferences (node_id, interface_id)
+		SELECT network_interface.node_id, network_interface.id
+		  FROM monitoring.network_interfaces network_interface
+		 WHERE network_interface.node_id = $1::uuid
+		   AND network_interface.id = $2::uuid
+		   AND network_interface.removed_at IS NULL
+		ON CONFLICT (node_id) DO UPDATE SET
+			interface_id = EXCLUDED.interface_id,
+			updated_at = CURRENT_TIMESTAMP
+	`, nodeID, interfaceID)
+	if err != nil {
+		return fmt.Errorf("set primary network interface: %w", err)
+	}
+	if command.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (store *Store) listCPUPackages(ctx context.Context, nodeID string) ([]CPUHardware, error) {

@@ -34,6 +34,7 @@ type dataStore interface {
 	RegisterNode(context.Context, store.RegisterNodeInput) (store.NodeCredentials, error)
 	ListNodes(context.Context) ([]store.NodeSummary, error)
 	GetNode(context.Context, string) (store.NodeDetail, error)
+	SetPrimaryNetworkInterface(context.Context, string, string) error
 	GetNodeHistory(context.Context, string, string) (store.NodeHistory, error)
 }
 
@@ -56,6 +57,7 @@ func NewAPI(database dataStore, adminToken string, logger *slog.Logger, releaseC
 	api.mux.HandleFunc("POST /api/v1/admin/nodes", api.requireAdmin(api.registerNode))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes", api.requireAdmin(api.listNodes))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes/{nodeID}", api.requireAdmin(api.getNode))
+	api.mux.HandleFunc("PUT /api/v1/admin/nodes/{nodeID}/primary-network-interface", api.requireAdmin(api.setPrimaryNetworkInterface))
 	api.mux.HandleFunc("GET /agent/releases/{version}/{asset}", api.releaseAsset)
 	api.registerWebRoutes()
 	return api
@@ -182,6 +184,39 @@ func (api *API) getNode(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(response, http.StatusOK, detail)
+}
+
+type primaryNetworkInterfaceInput struct {
+	InterfaceID string `json:"interface_id"`
+}
+
+// setPrimaryNetworkInterface changes the interface used for the node card IP and IP ordering.
+func (api *API) setPrimaryNetworkInterface(response http.ResponseWriter, request *http.Request) {
+	nodeID := request.PathValue("nodeID")
+	if !report.ValidUUID(nodeID) {
+		writeError(response, http.StatusBadRequest, "invalid node id")
+		return
+	}
+	var input primaryNetworkInterfaceInput
+	if err := decodeJSON(response, request, &input); err != nil {
+		writeError(response, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !report.ValidUUID(input.InterfaceID) {
+		writeError(response, http.StatusBadRequest, "interface_id must be an RFC 4122 UUID")
+		return
+	}
+	ctx, cancel := contextWithTimeout(request, 10*time.Second)
+	defer cancel()
+	if err := api.store.SetPrimaryNetworkInterface(ctx, nodeID, input.InterfaceID); errors.Is(err, store.ErrNotFound) {
+		writeError(response, http.StatusNotFound, "active network interface not found for node")
+		return
+	} else if err != nil {
+		api.logger.Error("set primary network interface failed", "node_id", nodeID, "interface_id", input.InterfaceID, "error", err)
+		writeError(response, http.StatusInternalServerError, "cannot set primary network interface")
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]string{"interface_id": input.InterfaceID})
 }
 
 func (api *API) getNodeHistory(response http.ResponseWriter, request *http.Request) {

@@ -18,10 +18,13 @@ import (
 const testAdminToken = "admin-token-with-at-least-thirty-two-characters"
 
 type fakeStore struct {
-	auth       store.NodeAuth
-	ingested   bool
-	registered bool
-	nodes      []store.NodeSummary
+	auth                        store.NodeAuth
+	ingested                    bool
+	registered                  bool
+	nodes                       []store.NodeSummary
+	primaryNetworkNodeID        string
+	primaryNetworkInterfaceID   string
+	primaryNetworkPreferenceErr error
 }
 
 func (fake *fakeStore) Ready(context.Context) error { return nil }
@@ -41,6 +44,11 @@ func (fake *fakeStore) ListNodes(context.Context) ([]store.NodeSummary, error) {
 }
 func (fake *fakeStore) GetNode(context.Context, string) (store.NodeDetail, error) {
 	return store.NodeDetail{}, store.ErrNotFound
+}
+func (fake *fakeStore) SetPrimaryNetworkInterface(_ context.Context, nodeID, interfaceID string) error {
+	fake.primaryNetworkNodeID = nodeID
+	fake.primaryNetworkInterfaceID = interfaceID
+	return fake.primaryNetworkPreferenceErr
 }
 func (fake *fakeStore) GetNodeHistory(context.Context, string, string) (store.NodeHistory, error) {
 	return store.NodeHistory{}, store.ErrNotFound
@@ -234,6 +242,65 @@ func TestHistoryRangeValidation(t *testing.T) {
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("expected invalid range to return 400, got %d", response.Code)
+	}
+}
+
+func TestSetPrimaryNetworkInterfaceRequiresAdminToken(t *testing.T) {
+	api, database := testAPI()
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/nodes/10000000-0000-4000-8000-000000000001/primary-network-interface", bytes.NewReader([]byte(`{"interface_id":"80000000-0000-4000-8000-000000000001"}`)))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", response.Code, response.Body.String())
+	}
+	if database.primaryNetworkInterfaceID != "" {
+		t.Fatal("unauthorized preference change reached the store")
+	}
+}
+
+func TestSetPrimaryNetworkInterfaceUpdatesActiveInterface(t *testing.T) {
+	api, database := testAPI()
+	nodeID := "10000000-0000-4000-8000-000000000001"
+	interfaceID := "80000000-0000-4000-8000-000000000001"
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/nodes/"+nodeID+"/primary-network-interface", bytes.NewReader([]byte(`{"interface_id":"`+interfaceID+`"}`)))
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	if database.primaryNetworkNodeID != nodeID || database.primaryNetworkInterfaceID != interfaceID {
+		t.Fatalf("unexpected preference update: node=%q interface=%q", database.primaryNetworkNodeID, database.primaryNetworkInterfaceID)
+	}
+}
+
+func TestSetPrimaryNetworkInterfaceRejectsInvalidInterfaceID(t *testing.T) {
+	api, database := testAPI()
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/nodes/10000000-0000-4000-8000-000000000001/primary-network-interface", bytes.NewReader([]byte(`{"interface_id":"eth0"}`)))
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", response.Code, response.Body.String())
+	}
+	if database.primaryNetworkInterfaceID != "" {
+		t.Fatal("invalid interface id reached the store")
+	}
+}
+
+func TestSetPrimaryNetworkInterfaceReturnsNotFoundForInactiveInterface(t *testing.T) {
+	api, database := testAPI()
+	database.primaryNetworkPreferenceErr = store.ErrNotFound
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/admin/nodes/10000000-0000-4000-8000-000000000001/primary-network-interface", bytes.NewReader([]byte(`{"interface_id":"80000000-0000-4000-8000-000000000001"}`)))
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", response.Code, response.Body.String())
 	}
 }
 

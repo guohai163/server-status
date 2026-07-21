@@ -241,6 +241,12 @@ button { color: inherit; }
 .data-table th { background: var(--surface-subtle); color: var(--muted); font-size: 10px; font-weight: 650; text-transform: uppercase; }
 .data-table td { color: var(--table-text); }
 .data-table code { font-size: 11px; }
+.selected-network-row td { background: var(--green-soft); }
+.network-select-button { min-width: 66px; height: 30px; padding: 0 9px; border: 1px solid var(--control-line); border-radius: 4px; background: var(--surface); color: var(--ink); cursor: pointer; font-size: 11px; font-weight: 650; }
+.network-select-button:hover { border-color: var(--green); color: var(--green); }
+.network-select-button.active { border-color: var(--green); background: var(--green-soft); color: var(--green); }
+.network-select-button:disabled { cursor: default; opacity: .75; }
+.network-select-button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 .empty-inline { padding: 18px; color: var(--quiet); font-size: 12px; }
 .loading-state, .error-state, .empty-state { min-height: 45vh; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--muted); font-size: 13px; }
 .error-state, .empty-state { flex-direction: column; text-align: center; }
@@ -259,7 +265,19 @@ button { color: inherit; }
   box-shadow: 0 20px 60px var(--dialog-shadow);
   color: var(--ink);
 }
-.node-dialog::backdrop { background: var(--backdrop); }
+.preference-dialog {
+  width: min(440px, calc(100% - 32px));
+  padding: 0;
+  border: 1px solid var(--control-line);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: 0 20px 60px var(--dialog-shadow);
+  color: var(--ink);
+}
+.node-dialog::backdrop, .preference-dialog::backdrop { background: var(--backdrop); }
+.dialog-head p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+.preference-form { display: grid; gap: 16px; padding: 22px; }
+.preference-form .form-error, .preference-form .dialog-actions { grid-column: 1; }
 .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 20px 22px; border-bottom: 1px solid var(--line); }
 .dialog-head h2 { margin: 0; font-size: 18px; line-height: 26px; letter-spacing: 0; }
 .node-form { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 22px; }
@@ -308,7 +326,8 @@ button { color: inherit; }
   .topbar-actions { gap: 7px; }
   .command-button { padding: 0 10px; }
   .node-dialog { width: calc(100% - 20px); max-height: calc(100vh - 20px); }
-  .dialog-head, .node-form, .install-result { padding: 16px; }
+  .preference-dialog { width: calc(100% - 20px); }
+  .dialog-head, .node-form, .install-result, .preference-form { padding: 16px; }
   .node-form { grid-template-columns: 1fr; }
   .field, .field-wide { grid-column: 1; }
   .install-result-head { align-items: flex-start; flex-direction: column; }

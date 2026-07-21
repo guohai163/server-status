@@ -62,8 +62,27 @@ func TestNodeSummaryQueryIncludesMachineAndPackageDetails(t *testing.T) {
 }
 
 func TestNodeSummaryQueryPrefersReportedBridgeIP(t *testing.T) {
-	expected := "COALESCE(NULLIF(status.labels->>'" + primaryIPLabelKey + "', ''), primary_address.address, '')"
+	expected := "NULLIF(status.labels->>'" + primaryIPLabelKey + "', '')"
 	if !strings.Contains(nodeSummarySQL, expected) {
 		t.Error("node summary query does not prefer the Agent-reported bridge IP")
+	}
+}
+
+func TestNodeSummaryQueryPrioritizesPreferredNetworkInterface(t *testing.T) {
+	for _, fragment := range []string{
+		"monitoring.node_network_preferences",
+		"network_interface.id = network_preference.interface_id",
+		"network_interface.removed_at IS NULL",
+		"network_address.address AS sort_address",
+		"primary_address.is_preferred",
+	} {
+		if !strings.Contains(nodeSummarySQL, fragment) {
+			t.Errorf("node summary query does not contain %q", fragment)
+		}
+	}
+	if !strings.Contains(nodeListOrderSQL, "primary_address.is_preferred") ||
+		!strings.Contains(nodeListOrderSQL, "primary_address.sort_address") ||
+		!strings.Contains(nodeListOrderSQL, primaryIPLabelKey) {
+		t.Error("node list is not ordered by the selected dashboard IP")
 	}
 }

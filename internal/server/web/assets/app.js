@@ -12,13 +12,25 @@
   const installCommandResult = document.getElementById("install-command-result");
   const installCommand = document.getElementById("install-command");
   const copyInstallCommand = document.getElementById("copy-install-command");
+  const networkPreferenceDialog = document.getElementById("network-preference-dialog");
+  const networkPreferenceForm = document.getElementById("network-preference-form");
+  const networkPreferenceContext = document.getElementById("network-preference-context");
+  const networkPreferenceToken = document.getElementById("network-preference-token");
+  const networkPreferenceError = document.getElementById("network-preference-error");
+  const saveNetworkPreference = document.getElementById("save-network-preference");
   const ranges = ["1h", "6h", "24h", "7d", "30d", "90d"];
+  const adminTokenStorageKey = "server-status.admin-token";
+  const adminTokenLifetimeMs = 30 * 24 * 60 * 60 * 1000;
+  const storedAdminToken = loadStoredAdminToken();
   let nodes = [];
   let selectedRange = "24h";
   let currentDetail = null;
   let currentHistoryPoints = [];
   let refreshTimer = null;
   let resizeFrame = null;
+  let cachedAdminToken = storedAdminToken.token;
+  let cachedAdminTokenExpiresAt = storedAdminToken.expiresAt;
+  let pendingNetworkPreference = null;
 
   const chartColorVariables = {
     cpu: "--chart-cpu", memory: "--chart-memory", disk: "--chart-disk",
@@ -33,6 +45,41 @@
     return String(value ?? "").replace(/[&<>'"]/g, (character) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
     })[character]);
+  }
+
+  function loadStoredAdminToken() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(adminTokenStorageKey) || "null");
+      if (stored && typeof stored.token === "string" && stored.token && Number(stored.expires_at) > Date.now()) {
+        return { token: stored.token, expiresAt: Number(stored.expires_at) };
+      }
+      localStorage.removeItem(adminTokenStorageKey);
+    } catch (_) {
+      try { localStorage.removeItem(adminTokenStorageKey); } catch (_) { /* storage is unavailable */ }
+    }
+    return { token: "", expiresAt: 0 };
+  }
+
+  function rememberAdminToken(token) {
+    cachedAdminToken = token;
+    cachedAdminTokenExpiresAt = Date.now() + adminTokenLifetimeMs;
+    try {
+      localStorage.setItem(adminTokenStorageKey, JSON.stringify({
+        token,
+        expires_at: cachedAdminTokenExpiresAt
+      }));
+    } catch (_) { /* private browsing or storage policy may block persistence */ }
+  }
+
+  function clearStoredAdminToken() {
+    cachedAdminToken = "";
+    cachedAdminTokenExpiresAt = 0;
+    try { localStorage.removeItem(adminTokenStorageKey); } catch (_) { /* storage is unavailable */ }
+  }
+
+  function currentAdminToken() {
+    if (cachedAdminTokenExpiresAt <= Date.now()) clearStoredAdminToken();
+    return cachedAdminToken;
   }
 
   function clamp(value, min, max) { return Math.min(max, Math.max(min, Number(value) || 0)); }
@@ -270,6 +317,9 @@
     <section class="section"><div class="section-head"><div><h2>网络接口</h2><p>地址、链路状态与当前吞吐</p></div></div>${networkTable(detail.network)}</section>`;
     app.querySelector(".back-button").addEventListener("click", () => { location.hash = ""; });
     app.querySelectorAll("[data-range]").forEach((button) => button.addEventListener("click", () => changeRange(node.node_id, button.dataset.range)));
+    app.querySelectorAll("[data-primary-interface-id]").forEach((button) => button.addEventListener("click", () => {
+      selectPrimaryNetworkInterface(node.node_id, button.dataset.primaryInterfaceId, button.dataset.interfaceName, button);
+    }));
     renderCharts(history.points || []);
   }
 
@@ -406,7 +456,86 @@
     return table(["挂载点", "设备 / 类型", "使用", "容量"], (items || []).map((item) => `<tr><td><code>${escapeHTML(item.mount_point)}</code></td><td>${escapeHTML(item.device_name)} / ${escapeHTML(item.filesystem_type)}</td><td>${formatPercent(item.used_percent)}</td><td>${formatBytes(item.used_bytes)} / ${formatBytes(item.total_bytes)}</td></tr>`));
   }
   function networkTable(items) {
-    return table(["接口", "地址", "链路", "接收", "发送"], (items || []).map((item) => `<tr><td><code>${escapeHTML(item.name)}</code><br>${escapeHTML(item.mac_address || "")}</td><td>${(item.addresses || []).map((address) => `<code>${escapeHTML(address)}</code>`).join("<br>") || "--"}</td><td>${item.link_up ? "已连接" : "未连接"}${item.link_speed_mbps ? ` / ${item.link_speed_mbps} Mbps` : ""}</td><td>${formatRate((item.rx_bits_per_second || 0) / 8)}</td><td>${formatRate((item.tx_bits_per_second || 0) / 8)}</td></tr>`));
+    return table(["接口", "地址", "链路", "接收", "发送", "首页 IP"], (items || []).map((item) => {
+      const hasAddress = (item.addresses || []).length > 0;
+      const buttonText = item.is_primary ? '<span aria-hidden="true">✓</span> 已选择' : "选择";
+      const disabled = item.is_primary || !hasAddress;
+      const title = !hasAddress ? ' title="接口暂无 IP 地址"' : "";
+      return `<tr class="${item.is_primary ? "selected-network-row" : ""}"><td><code>${escapeHTML(item.name)}</code><br>${escapeHTML(item.mac_address || "")}</td><td>${(item.addresses || []).map((address) => `<code>${escapeHTML(address)}</code>`).join("<br>") || "--"}</td><td>${item.link_up ? "已连接" : "未连接"}${item.link_speed_mbps ? ` / ${item.link_speed_mbps} Mbps` : ""}</td><td>${formatRate((item.rx_bits_per_second || 0) / 8)}</td><td>${formatRate((item.tx_bits_per_second || 0) / 8)}</td><td><button class="network-select-button ${item.is_primary ? "active" : ""}" type="button" data-primary-interface-id="${escapeHTML(item.interface_id)}" data-interface-name="${escapeHTML(item.name)}"${disabled ? " disabled" : ""}${title}>${buttonText}</button></td></tr>`;
+    }));
+  }
+
+  function openNetworkPreferenceDialog(nodeID, interfaceID, interfaceName, errorMessage) {
+    pendingNetworkPreference = { nodeID, interfaceID, interfaceName };
+    networkPreferenceContext.textContent = `${interfaceName} 将作为首页卡片的 IP 来源`;
+    networkPreferenceError.textContent = errorMessage || "";
+    networkPreferenceError.hidden = !errorMessage;
+    networkPreferenceToken.value = currentAdminToken();
+    networkPreferenceDialog.showModal();
+    networkPreferenceToken.focus();
+  }
+
+  function closeNetworkPreferenceDialog() {
+    networkPreferenceDialog.close();
+  }
+
+  async function updatePrimaryNetworkInterface(nodeID, interfaceID, token) {
+    const response = await fetch(`/api/v1/admin/nodes/${encodeURIComponent(nodeID)}/primary-network-interface`, {
+      method: "PUT",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ interface_id: interfaceID })
+    });
+    if (!response.ok) {
+      let message = `保存失败 (${response.status})`;
+      try { message = (await response.json()).error || message; } catch (_) { /* response is not JSON */ }
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
+    }
+  }
+
+  async function selectPrimaryNetworkInterface(nodeID, interfaceID, interfaceName, button) {
+    const adminToken = currentAdminToken();
+    if (!adminToken) {
+      openNetworkPreferenceDialog(nodeID, interfaceID, interfaceName);
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "保存中";
+    try {
+      await updatePrimaryNetworkInterface(nodeID, interfaceID, adminToken);
+      await loadDetail(nodeID);
+    } catch (error) {
+      if (error.status === 401) clearStoredAdminToken();
+      openNetworkPreferenceDialog(nodeID, interfaceID, interfaceName, error.status === 401 ? "Admin Token 无效" : error.message);
+    }
+  }
+
+  async function submitNetworkPreference(event) {
+    event.preventDefault();
+    if (!networkPreferenceForm.reportValidity() || !pendingNetworkPreference) return;
+    const token = networkPreferenceToken.value.trim();
+    networkPreferenceError.hidden = true;
+    saveNetworkPreference.disabled = true;
+    saveNetworkPreference.textContent = "正在保存";
+    try {
+      await updatePrimaryNetworkInterface(pendingNetworkPreference.nodeID, pendingNetworkPreference.interfaceID, token);
+      rememberAdminToken(token);
+      const nodeID = pendingNetworkPreference.nodeID;
+      closeNetworkPreferenceDialog();
+      await loadDetail(nodeID);
+    } catch (error) {
+      if (error.status === 401) clearStoredAdminToken();
+      networkPreferenceError.textContent = error.status === 401 ? "Admin Token 无效" : error.message;
+      networkPreferenceError.hidden = false;
+    } finally {
+      saveNetworkPreference.disabled = false;
+      saveNetworkPreference.textContent = "确认选择";
+    }
   }
 
   function renderError(error, withBack) {
@@ -480,9 +609,11 @@
       if (!response.ok) {
         let message = `创建失败 (${response.status})`;
         try { message = (await response.json()).error || message; } catch (_) { /* response is not JSON */ }
+        if (response.status === 401) clearStoredAdminToken();
         throw new Error(message);
       }
       const credentials = await response.json();
+      rememberAdminToken(adminToken);
       document.getElementById("admin-token").value = "";
       installCommand.textContent = buildInstallCommand(credentials, environment, version);
       addNodeForm.hidden = true;
@@ -532,6 +663,7 @@
   });
   addNodeButton.addEventListener("click", () => {
     resetAddNodeDialog();
+    document.getElementById("admin-token").value = currentAdminToken();
     addNodeDialog.showModal();
     document.getElementById("admin-token").focus();
   });
@@ -540,6 +672,15 @@
   addNodeDialog.addEventListener("close", resetAddNodeDialog);
   addNodeForm.addEventListener("submit", registerNode);
   copyInstallCommand.addEventListener("click", copyCommand);
+  document.getElementById("close-network-preference-dialog").addEventListener("click", closeNetworkPreferenceDialog);
+  networkPreferenceDialog.querySelector("[data-close-network-preference]").addEventListener("click", closeNetworkPreferenceDialog);
+  networkPreferenceDialog.addEventListener("close", () => {
+    pendingNetworkPreference = null;
+    networkPreferenceToken.value = "";
+    networkPreferenceError.hidden = true;
+    networkPreferenceError.textContent = "";
+  });
+  networkPreferenceForm.addEventListener("submit", submitNetworkPreference);
   window.addEventListener("hashchange", route);
   window.addEventListener("resize", () => {
     if (!currentDetail) return;
