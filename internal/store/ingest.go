@@ -78,6 +78,10 @@ func (store *Store) Ingest(ctx context.Context, auth NodeAuth, payload report.Re
 	if err != nil {
 		return err
 	}
+	gpuIDs, err := activeGPUIDs(ctx, tx, auth.NodeID)
+	if err != nil {
+		return err
+	}
 
 	memory := payload.Metrics.Memory
 	cpu := payload.Metrics.CPU
@@ -178,6 +182,29 @@ func (store *Store) Ingest(ctx context.Context, auth NodeAuth, payload report.Re
 			return fmt.Errorf("insert network sample %q: %w", metric.InterfaceKey, err)
 		}
 	}
+	for _, metric := range payload.Metrics.GPUs {
+		gpuID, ok := gpuIDs[metric.GPUKey]
+		if !ok {
+			return fmt.Errorf("%w: GPU %q", ErrInvalidResource, metric.GPUKey)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO monitoring.gpu_current_metrics (
+				node_id, gpu_id, bucket_at, collected_at, received_at,
+				utilization_percent, memory_used_bytes, updated_at
+			) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+			ON CONFLICT (node_id, gpu_id) DO UPDATE SET
+				bucket_at = EXCLUDED.bucket_at,
+				collected_at = EXCLUDED.collected_at,
+				received_at = EXCLUDED.received_at,
+				utilization_percent = EXCLUDED.utilization_percent,
+				memory_used_bytes = EXCLUDED.memory_used_bytes,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE EXCLUDED.bucket_at >= gpu_current_metrics.bucket_at
+		`, auth.NodeID, gpuID, bucketAt, payload.CollectedAt.UTC(), receivedAt,
+			metric.UtilizationPercent, i64(metric.MemoryUsedBytes)); err != nil {
+			return fmt.Errorf("upsert GPU metric %q: %w", metric.GPUKey, err)
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit report: %w", err)
 	}
@@ -199,6 +226,42 @@ func syncInventory(ctx context.Context, tx pgx.Tx, nodeID string, inventory repo
 	}
 	if err := syncNetworkInterfaces(ctx, tx, nodeID, inventory.NetworkInterfaces, observedAt); err != nil {
 		return err
+	}
+	if err := syncGPUs(ctx, tx, nodeID, inventory.GPUs, observedAt); err != nil {
+		return err
+	}
+	return nil
+}
+
+func syncGPUs(ctx context.Context, tx pgx.Tx, nodeID string, items []report.GPU, at time.Time) error {
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		keys = append(keys, item.Key)
+		result, err := tx.Exec(ctx, `
+			UPDATE monitoring.gpu_devices SET
+				device_index = $3, gpu_uuid = $4, model_name = $5,
+				memory_total_bytes = $6, last_seen_at = $7
+			WHERE node_id = $1::uuid AND hardware_key = $2 AND removed_at IS NULL
+		`, nodeID, item.Key, item.Index, item.UUID, item.ModelName, i64(item.MemoryTotalBytes), at)
+		if err != nil {
+			return fmt.Errorf("update GPU %q: %w", item.Key, err)
+		}
+		if result.RowsAffected() == 0 {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO monitoring.gpu_devices (
+					node_id, hardware_key, device_index, gpu_uuid, model_name,
+					memory_total_bytes, first_seen_at, last_seen_at
+				) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $7)
+			`, nodeID, item.Key, item.Index, item.UUID, item.ModelName, i64(item.MemoryTotalBytes), at); err != nil {
+				return fmt.Errorf("insert GPU %q: %w", item.Key, err)
+			}
+		}
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE monitoring.gpu_devices SET removed_at = $3
+		WHERE node_id = $1::uuid AND removed_at IS NULL AND NOT (hardware_key = ANY($2::text[]))
+	`, nodeID, keys, at); err != nil {
+		return fmt.Errorf("remove missing GPUs: %w", err)
 	}
 	return nil
 }
@@ -465,6 +528,29 @@ func activeInterfaceIDs(ctx context.Context, tx pgx.Tx, nodeID string) (map[stri
 		result[key] = resourceID
 	}
 	return result, rows.Err()
+}
+
+func activeGPUIDs(ctx context.Context, tx pgx.Tx, nodeID string) (map[string]string, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT hardware_key, id::text FROM monitoring.gpu_devices
+		WHERE node_id = $1::uuid AND removed_at IS NULL
+	`, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("query active GPUs: %w", err)
+	}
+	defer rows.Close()
+	result := make(map[string]string)
+	for rows.Next() {
+		var key, id string
+		if err := rows.Scan(&key, &id); err != nil {
+			return nil, fmt.Errorf("scan active GPU: %w", err)
+		}
+		result[key] = id
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate active GPUs: %w", err)
+	}
+	return result, nil
 }
 
 func i64(value uint64) int64 {

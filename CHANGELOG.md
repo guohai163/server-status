@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.0 - 2026-07-21
+
+### Added
+- Collect NVIDIA GPU utilization and framebuffer memory usage through `nvidia-smi`, preserving separate current metrics for every GPU.
+- Mark GPU-equipped nodes with the NVIDIA icon and show per-GPU utilization in node details.
+
 ## v0.6.0 - 2026-07-21
 
 ### Added

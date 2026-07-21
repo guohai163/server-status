@@ -182,9 +182,10 @@
     const agentVersion = String(node.agent_version || "--").trim() || "--";
     const status = statusText(node.status);
     const physicalIcon = isPhysicalNode(node) ? '<img class="physical-server-icon" src="/assets/cloud-server.svg" alt="" title="物理服务器">' : "";
+    const nvidiaIcon = node.has_nvidia_gpu ? '<img class="nvidia-icon" src="/assets/nvidia.svg" alt="" title="NVIDIA GPU">' : "";
     return `<button class="node-card" type="button" data-node-id="${escapeHTML(node.node_id)}">
       <div class="card-head">
-        <div class="card-title"><strong class="card-name">${physicalIcon}<span>${escapeHTML(displayName(node))}</span></strong><span class="card-meta">${escapeHTML(addressAndOS)}</span></div>
+        <div class="card-title"><strong class="card-name">${physicalIcon}${nvidiaIcon}<span>${escapeHTML(displayName(node))}</span></strong><span class="card-meta">${escapeHTML(addressAndOS)}</span></div>
         <span class="status-label" aria-label="${escapeHTML(`${status}，Agent ${agentVersion}`)}" title="${escapeHTML(`${status} · Agent ${agentVersion}`)}"><i class="status-dot ${escapeHTML(node.status)}" aria-hidden="true"></i><span class="agent-version">${escapeHTML(agentVersion)}</span></span>
       </div>
       <div class="metric-list">
@@ -300,6 +301,7 @@
       ${metricTile("磁盘 I/O", `↓ ${formatRate(node.disk_read_bytes_per_second)}`, `↑ ${formatRate(node.disk_write_bytes_per_second)}`)}
       ${metricTile("运行时间", formatDuration(node.uptime_seconds), `${escapeHTML(node.os_name)} ${escapeHTML(node.os_version)}`)}
     </div>
+    ${gpuSection(detail.gpus)}
     <section class="section"><div class="section-head"><div><h2>历史数据</h2><p>${history.resolution === "hour" ? "小时汇总" : "分钟原始指标"}</p></div><div class="segmented" aria-label="历史时间范围">${rangeButtons}</div></div>
       <div class="chart-grid">
         ${chartPanel("resource-chart", "资源使用率", [["CPU", chartColorVariables.cpu], ["内存", chartColorVariables.memory], ["磁盘", chartColorVariables.disk]])}
@@ -454,6 +456,15 @@
   }
   function filesystemTable(items) {
     return table(["挂载点", "设备 / 类型", "使用", "容量"], (items || []).map((item) => `<tr><td><code>${escapeHTML(item.mount_point)}</code></td><td>${escapeHTML(item.device_name)} / ${escapeHTML(item.filesystem_type)}</td><td>${formatPercent(item.used_percent)}</td><td>${formatBytes(item.used_bytes)} / ${formatBytes(item.total_bytes)}</td></tr>`));
+  }
+  function gpuMeter(value) {
+    const percent = clamp(value, 0, 100);
+    return `<div class="gpu-meter"><strong>${formatPercent(percent)}</strong><div class="progress"><i class="${usageClass(percent)}" style="width:${percent}%"></i></div></div>`;
+  }
+  function gpuSection(items) {
+    if (!items || !items.length) return "";
+    const rows = items.map((item) => `<tr><td><span class="gpu-model"><img class="nvidia-icon" src="/assets/nvidia.svg" alt=""><span><strong>GPU ${item.index}</strong><small>${escapeHTML(item.model_name)}</small></span></span></td><td><span class="gpu-cell-label">GPU 使用率</span>${gpuMeter(item.utilization_percent)}</td><td><span class="gpu-cell-label">显存使用率</span>${gpuMeter(item.memory_usage_percent)}</td><td><span class="gpu-cell-label">显存</span>${formatBytes(item.memory_used_bytes)} / ${formatBytes(item.memory_total_bytes)}</td></tr>`);
+    return `<section class="section gpu-section"><div class="section-head"><div><h2>GPU</h2><p>${items.length} 张 NVIDIA GPU 的当前负载</p></div></div>${table(["设备", "GPU 使用率", "显存使用率", "显存"], rows)}</section>`;
   }
   function networkTable(items) {
     return table(["接口", "地址", "链路", "接收", "发送", "首页 IP"], (items || []).map((item) => {

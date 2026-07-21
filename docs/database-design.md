@@ -20,6 +20,7 @@ erDiagram
     NODES ||--o{ BLOCK_DEVICES : owns
     NODES ||--o{ FILESYSTEMS : mounts
     NODES ||--o{ NETWORK_INTERFACES : owns
+    NODES ||--o{ GPU_DEVICES : owns
     NODES ||--o| NODE_NETWORK_PREFERENCES : configures
     NETWORK_INTERFACES ||--o| NODE_NETWORK_PREFERENCES : selected_by
     NETWORK_INTERFACES ||--o{ NETWORK_ADDRESSES : has
@@ -31,6 +32,7 @@ erDiagram
     NODES ||--|| NODE_CURRENT_METRICS : latest
     FILESYSTEMS ||--o| FILESYSTEM_CURRENT_METRICS : latest
     NETWORK_INTERFACES ||--o| NETWORK_CURRENT_METRICS : latest
+    GPU_DEVICES ||--o| GPU_CURRENT_METRICS : latest
 ```
 
 硬盘型号、序列号和数量来自 `block_devices`；容量使用率来自 `filesystems`。二者刻意分开，以支持 LVM、RAID、一个文件系统跨设备以及同一设备多挂载等情况。
@@ -57,6 +59,7 @@ erDiagram
 | `network_interfaces` | 网卡稳定标识、名称、MAC、MTU 和链路速率 |
 | `network_addresses` | PostgreSQL `inet` 格式的 IPv4/IPv6 地址及作用域 |
 | `node_network_preferences` | 首页卡片 IP 来源网卡；每个节点最多选择一个 |
+| `gpu_devices` | NVIDIA GPU UUID、设备索引、型号和显存容量 |
 
 每张清单表使用稳定 key 加 `first_seen_at`、`last_seen_at`、`removed_at` 记录观察周期。当前有效记录有局部唯一索引；设备移除后，相同 key 再次出现会创建新的历史记录。
 
@@ -71,6 +74,8 @@ erDiagram
 `node_metric_samples` 的主键是 `(bucket_at, node_id)`，也是请求幂等键。它同时保存整机磁盘读写累计值、区间字节数和区间操作数。文件系统和网卡明细通过同一复合键关联主快照，并通过 `(node_id, resource_id)` 复合外键阻止跨节点引用。
 
 文件系统使用率由 `used_bytes / total_bytes` 生成。网卡 current 表的每秒速率由 `bytes_delta * 8 / interval_seconds` 生成，磁盘 current 表的每秒字节数由 `bytes_delta / interval_seconds` 生成。累计计数用于审计和处理计数器重置，区间增量用于趋势和汇总；节点小时表保存磁盘读写字节合计以及平均/峰值速率。
+
+NVIDIA GPU 由 Agent 调用 `nvidia-smi` 识别，以 GPU UUID 作为稳定清单 key。`gpu_current_metrics` 保存每张有效 GPU 最新的核心使用率和显存已用字节数；显存使用率在查询时使用清单中的总显存计算。无 NVIDIA 驱动或无 GPU 的节点不会生成相关清单和指标。
 
 ## 上报事务
 
@@ -91,6 +96,7 @@ erDiagram
 - `v_node_hardware_summary`：CPU 封装/核心/线程及型号、内存条数量/容量及型号、物理硬盘数量/容量及型号。
 - `v_filesystem_status`：所有有效挂载点的最新容量和 inode 使用情况。
 - `v_network_status`：所有有效网卡、IPv4/IPv6 地址、链路状态、当前流量和错误计数。
+- GPU 详情查询：有效 GPU 清单关联 `gpu_current_metrics`，按设备索引逐卡返回。
 
 首页节点查询优先从 `node_network_preferences` 指定的有效网卡选择地址，再按地址作用域、IPv4/IPv6 family 和 PostgreSQL `inet` 值确定该网卡内的展示 IP。未设置偏好，或所选网卡被移除、暂无地址时，查询回退到所有有效网卡的自动选址；节点列表按最终展示 IP 的 `inet` 值排序，无 IP 的节点排在最后。
 
@@ -124,14 +130,15 @@ SELECT monitoring.rollup_hour($1::timestamptz);
 
 ## 部署与验证
 
-迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好。在连接信息由环境或 `.pgpass` 提供的前提下执行：
+迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好，`V005` 增加 NVIDIA GPU 清单和当前指标。在连接信息由环境或 `.pgpass` 提供的前提下执行：
 
 ```bash
 psql -v ON_ERROR_STOP=1 -f db/migrations/V001__monitoring_schema.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V002__safe_partition_retention.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V003__disk_io_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V004__primary_network_interface.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V005__nvidia_gpu_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/verify/V001__verify.sql
 ```
 
-验收脚本会覆盖节点、令牌、硬件历史、IPv4/IPv6、首页网卡偏好、分钟指标、current 触发器、幂等更新、跨节点约束、小时汇总、角色权限和查询计划，最后执行 `ROLLBACK`，不会保留验证数据。
+验收脚本会覆盖节点、令牌、硬件历史、IPv4/IPv6、首页网卡偏好、多 GPU 当前指标、分钟指标、current 触发器、幂等更新、跨节点约束、小时汇总、角色权限和查询计划，最后执行 `ROLLBACK`，不会保留验证数据。

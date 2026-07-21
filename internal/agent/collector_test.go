@@ -106,3 +106,25 @@ func TestDiskCounterDeltaAggregation(t *testing.T) {
 		t.Fatalf("unexpected disk deltas: %+v", metric)
 	}
 }
+
+func TestParseNVIDIASMIMultipleGPUs(t *testing.T) {
+	inventory, metrics := parseNVIDIASMI(`GPU-b, NVIDIA RTX 4090, 1, 88, 16384, 24564
+GPU-a, NVIDIA GeForce RTX 3060, 0, 37, 2048, 12288
+`)
+	if len(inventory) != 2 || len(metrics) != 2 {
+		t.Fatalf("expected two GPUs, got inventory=%d metrics=%d", len(inventory), len(metrics))
+	}
+	if inventory[0].UUID != "GPU-a" || inventory[0].Index != 0 || inventory[0].MemoryTotalBytes != 12288*1024*1024 {
+		t.Fatalf("unexpected first GPU: %+v", inventory[0])
+	}
+	if metrics[1].GPUKey != "GPU-b" || metrics[1].UtilizationPercent != 88 || metrics[1].MemoryUsedBytes != 16384*1024*1024 {
+		t.Fatalf("unexpected second GPU metrics: %+v", metrics[1])
+	}
+}
+
+func TestParseNVIDIASMISkipsUnavailableRows(t *testing.T) {
+	inventory, metrics := parseNVIDIASMI("malformed,row\nGPU-a, NVIDIA GPU, 0, [N/A], 0, 8192\nGPU-b, NVIDIA GPU, 1, 50, 1024, 8192\n")
+	if len(inventory) != 1 || len(metrics) != 1 || inventory[0].UUID != "GPU-b" {
+		t.Fatalf("expected malformed and unavailable rows to be skipped: inventory=%+v metrics=%+v", inventory, metrics)
+	}
+}

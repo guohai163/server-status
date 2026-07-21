@@ -54,7 +54,7 @@ func TestNodeSummaryQueryIncludesLoadAverages(t *testing.T) {
 }
 
 func TestNodeSummaryQueryIncludesMachineAndPackageDetails(t *testing.T) {
-	for _, field := range []string{machineTypeLabelKey, "threads_per_package"} {
+	for _, field := range []string{machineTypeLabelKey, "threads_per_package", "monitoring.gpu_devices"} {
 		if !strings.Contains(nodeSummarySQL, field) {
 			t.Errorf("node summary query does not include %s", field)
 		}

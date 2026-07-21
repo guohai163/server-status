@@ -22,6 +22,7 @@ Server Status 是一个面向 Linux 服务器的轻量监控系统，由节点 A
 | 内存 | 插槽、厂商、型号、序列号、类型、容量、速率 | 总量、已用、可用、缓存、buffer、swap |
 | 磁盘 | 设备名、厂商、型号、序列号、WWN、介质类型、容量 | 挂载点容量和 inode、整机磁盘读写字节与 IOPS 增量 |
 | 网络 | 网卡、MAC、MTU、链路速率、IPv4/IPv6 | 链路状态、收发累计量、区间流量、包、错误和丢包 |
+| GPU | NVIDIA 型号、UUID、显存容量 | 每张 GPU 的核心使用率和显存使用率 |
 
 磁盘硬件和文件系统使用率分别建模。这样可以正确处理 LVM、RAID、多挂载点和一个文件系统跨多个块设备的情况。
 
@@ -139,6 +140,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V001__monitoring_schema.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V002__safe_partition_retention.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V003__disk_io_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V004__primary_network_interface.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V005__nvidia_gpu_metrics.sql
 ```
 
 中央服务应使用继承 `server_status_writer` 的独立登录角色，不要使用 PostgreSQL 超级用户。
@@ -151,7 +153,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V004__primary_network_interface.sql
 SERVER_STATUS_DATABASE_URL=postgres://server_status_app:password@postgres:5432/server_status_db?sslmode=disable
 SERVER_STATUS_ADMIN_TOKEN=至少32位随机字符串
 SERVER_STATUS_LISTEN_ADDR=:8080
-SERVER_STATUS_CENTRAL_IMAGE=ghcr.io/guohai163/server-status-central:0.6.0
+SERVER_STATUS_CENTRAL_IMAGE=ghcr.io/guohai163/server-status-central:0.7.0
 ```
 
 Admin Token 只用于节点注册、令牌轮换和管理员查询。

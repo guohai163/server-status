@@ -66,7 +66,7 @@ func (r *Report) Validate(now time.Time) error {
 }
 
 func validateInventory(inventory Inventory) error {
-	if len(inventory.CPUPackages) > 1024 || len(inventory.MemoryModules) > 4096 || len(inventory.BlockDevices) > 4096 || len(inventory.Filesystems) > 4096 || len(inventory.NetworkInterfaces) > 4096 {
+	if len(inventory.CPUPackages) > 1024 || len(inventory.MemoryModules) > 4096 || len(inventory.BlockDevices) > 4096 || len(inventory.Filesystems) > 4096 || len(inventory.NetworkInterfaces) > 4096 || len(inventory.GPUs) > 1024 {
 		return errors.New("inventory contains too many resources")
 	}
 	if err := uniqueKeys("CPU package", len(inventory.CPUPackages), func(i int) string { return inventory.CPUPackages[i].Key }); err != nil {
@@ -129,6 +129,14 @@ func validateInventory(inventory Inventory) error {
 			}
 		}
 	}
+	if err := uniqueKeys("GPU", len(inventory.GPUs), func(i int) string { return inventory.GPUs[i].Key }); err != nil {
+		return err
+	}
+	for _, item := range inventory.GPUs {
+		if item.Index < 0 || strings.TrimSpace(item.UUID) == "" || strings.TrimSpace(item.ModelName) == "" || item.MemoryTotalBytes == 0 || item.MemoryTotalBytes > math.MaxInt64 {
+			return fmt.Errorf("invalid GPU %q", item.Key)
+		}
+	}
 	return nil
 }
 
@@ -185,6 +193,28 @@ func validateMetrics(inventory Inventory, metrics Metrics) error {
 			item.RXDroppedDelta, item.TXDroppedDelta,
 		); err != nil {
 			return fmt.Errorf("network metric %q: %w", item.InterfaceKey, err)
+		}
+	}
+	gpuMemoryByKey := make(map[string]uint64, len(inventory.GPUs))
+	for _, item := range inventory.GPUs {
+		gpuMemoryByKey[item.Key] = item.MemoryTotalBytes
+	}
+	if err := uniqueKeys("GPU metric", len(metrics.GPUs), func(i int) string { return metrics.GPUs[i].GPUKey }); err != nil {
+		return err
+	}
+	for _, item := range metrics.GPUs {
+		memoryTotal, ok := gpuMemoryByKey[item.GPUKey]
+		if !ok {
+			return fmt.Errorf("GPU metric references unknown key %q", item.GPUKey)
+		}
+		if item.UtilizationPercent < 0 || item.UtilizationPercent > 100 {
+			return fmt.Errorf("GPU metric %q utilization_percent must be between 0 and 100", item.GPUKey)
+		}
+		if err := validateUnsignedBigints(item.MemoryUsedBytes); err != nil {
+			return fmt.Errorf("GPU metric %q: %w", item.GPUKey, err)
+		}
+		if item.MemoryUsedBytes > memoryTotal {
+			return fmt.Errorf("GPU metric %q memory usage exceeds its total", item.GPUKey)
 		}
 	}
 	return nil

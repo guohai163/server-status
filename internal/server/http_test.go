@@ -171,7 +171,7 @@ func TestPublicNodeListIncludesLoadAveragesAndCapacities(t *testing.T) {
 	database.nodes = []store.NodeSummary{{
 		NodeID: "10000000-0000-4000-8000-000000000001",
 		Load1:  1.25, Load5: 0.75, Load15: 0.5,
-		MemoryTotalBytes: 8 << 30, DiskTotalBytes: 100 << 30,
+		MemoryTotalBytes: 8 << 30, DiskTotalBytes: 100 << 30, HasNVIDIAGPU: true,
 	}}
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes", nil)
 	response := httptest.NewRecorder()
@@ -191,6 +191,9 @@ func TestPublicNodeListIncludesLoadAveragesAndCapacities(t *testing.T) {
 	if payload.Nodes[0].MemoryTotalBytes != 8<<30 || payload.Nodes[0].DiskTotalBytes != 100<<30 {
 		t.Fatalf("unexpected capacities: %+v", payload.Nodes[0])
 	}
+	if !payload.Nodes[0].HasNVIDIAGPU {
+		t.Fatal("NVIDIA GPU capability was omitted from the node list")
+	}
 }
 
 func TestWebDashboardIsServed(t *testing.T) {
@@ -203,6 +206,19 @@ func TestWebDashboardIsServed(t *testing.T) {
 	}
 	if contentType := response.Header().Get("Content-Type"); contentType != "text/html; charset=utf-8" {
 		t.Fatalf("unexpected dashboard content type: %s", contentType)
+	}
+}
+
+func TestNVIDIAIconIsServed(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/assets/nvidia.svg", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected NVIDIA icon to return 200, got %d", response.Code)
+	}
+	if !bytes.Contains(response.Body.Bytes(), []byte("#76B900")) {
+		t.Fatal("NVIDIA icon does not contain the supplied brand color")
 	}
 }
 

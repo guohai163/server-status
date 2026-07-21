@@ -43,6 +43,15 @@ type Inventory struct {
 	BlockDevices      []BlockDevice      `json:"block_devices"`
 	Filesystems       []Filesystem       `json:"filesystems"`
 	NetworkInterfaces []NetworkInterface `json:"network_interfaces"`
+	GPUs              []GPU              `json:"gpus,omitempty"`
+}
+
+type GPU struct {
+	Key              string `json:"key"`
+	Index            int    `json:"index"`
+	UUID             string `json:"uuid"`
+	ModelName        string `json:"model_name"`
+	MemoryTotalBytes uint64 `json:"memory_total_bytes"`
 }
 
 type CPUPackage struct {
@@ -108,6 +117,13 @@ type Metrics struct {
 	Disk        DiskMetrics         `json:"disk"`
 	Filesystems []FilesystemMetrics `json:"filesystems"`
 	Network     []NetworkMetrics    `json:"network"`
+	GPUs        []GPUMetrics        `json:"gpus,omitempty"`
+}
+
+type GPUMetrics struct {
+	GPUKey             string  `json:"gpu_key"`
+	UtilizationPercent float64 `json:"utilization_percent"`
+	MemoryUsedBytes    uint64  `json:"memory_used_bytes"`
 }
 
 type CPUMetrics struct {

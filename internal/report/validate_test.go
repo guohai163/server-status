@@ -1,6 +1,8 @@
 package report
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -15,6 +17,7 @@ func TestInventoryFingerprintIsOrderIndependent(t *testing.T) {
 			Key: "eth0", Name: "eth0",
 			Addresses: []NetworkAddress{{Address: "2001:db8::1/64", Scope: "global"}, {Address: "10.0.0.1/24", Scope: "private"}},
 		}},
+		GPUs: []GPU{{Key: "GPU-b", UUID: "GPU-b", ModelName: "GPU B", Index: 1, MemoryTotalBytes: 2000}, {Key: "GPU-a", UUID: "GPU-a", ModelName: "GPU A", Index: 0, MemoryTotalBytes: 1000}},
 	}
 	second := Inventory{
 		Filesystems: []Filesystem{
@@ -25,6 +28,7 @@ func TestInventoryFingerprintIsOrderIndependent(t *testing.T) {
 			Key: "eth0", Name: "eth0",
 			Addresses: []NetworkAddress{{Address: "10.0.0.1/24", Scope: "private"}, {Address: "2001:db8::1/64", Scope: "global"}},
 		}},
+		GPUs: []GPU{{Key: "GPU-a", UUID: "GPU-a", ModelName: "GPU A", Index: 0, MemoryTotalBytes: 1000}, {Key: "GPU-b", UUID: "GPU-b", ModelName: "GPU B", Index: 1, MemoryTotalBytes: 2000}},
 	}
 	firstDigest, err := InventoryFingerprint(first)
 	if err != nil {
@@ -36,6 +40,16 @@ func TestInventoryFingerprintIsOrderIndependent(t *testing.T) {
 	}
 	if firstDigest != secondDigest {
 		t.Fatalf("fingerprints differ: %s != %s", firstDigest, secondDigest)
+	}
+}
+
+func TestEmptyGPUInventoryRemainsWireCompatible(t *testing.T) {
+	encoded, err := json.Marshal(Inventory{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "gpus") {
+		t.Fatalf("empty GPU inventory must be omitted from legacy fingerprints: %s", encoded)
 	}
 }
 
@@ -84,6 +98,27 @@ func TestReportValidationRejectsInvalidPrimaryIP(t *testing.T) {
 	payload.Agent.PrimaryIP = "10.0.0.1/24"
 	if err := payload.Validate(now); err == nil {
 		t.Fatal("primary IP with a prefix was accepted")
+	}
+}
+
+func TestReportValidationAcceptsMultipleGPUs(t *testing.T) {
+	now := time.Now().UTC()
+	payload := validTestReport(t, now)
+	payload.Inventory.GPUs = []GPU{
+		{Key: "GPU-a", UUID: "GPU-a", ModelName: "NVIDIA RTX 3060", Index: 0, MemoryTotalBytes: 12 << 30},
+		{Key: "GPU-b", UUID: "GPU-b", ModelName: "NVIDIA RTX 4090", Index: 1, MemoryTotalBytes: 24 << 30},
+	}
+	payload.Metrics.GPUs = []GPUMetrics{
+		{GPUKey: "GPU-a", UtilizationPercent: 25, MemoryUsedBytes: 3 << 30},
+		{GPUKey: "GPU-b", UtilizationPercent: 80, MemoryUsedBytes: 20 << 30},
+	}
+	payload.InventoryFingerprint, _ = InventoryFingerprint(payload.Inventory)
+	if err := payload.Validate(now); err != nil {
+		t.Fatalf("valid multi-GPU report rejected: %v", err)
+	}
+	payload.Metrics.GPUs[1].MemoryUsedBytes = 25 << 30
+	if err := payload.Validate(now); err == nil {
+		t.Fatal("GPU memory usage above total was accepted")
 	}
 }
 

@@ -182,7 +182,7 @@ button { color: inherit; }
 .card-title { min-width: 0; }
 .card-name { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--ink); font-size: 16px; line-height: 22px; }
 .card-name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.physical-server-icon { width: 16px; height: 16px; flex: 0 0 auto; object-fit: contain; }
+.physical-server-icon, .nvidia-icon { width: 16px; height: 16px; flex: 0 0 auto; object-fit: contain; }
 .card-meta { display: block; margin-top: 2px; color: var(--muted); font: 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .status-label { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
 .agent-version { font: 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -241,6 +241,16 @@ button { color: inherit; }
 .data-table th { background: var(--surface-subtle); color: var(--muted); font-size: 10px; font-weight: 650; text-transform: uppercase; }
 .data-table td { color: var(--table-text); }
 .data-table code { font-size: 11px; }
+.gpu-section .data-table { min-width: 660px; }
+.gpu-section .data-table th:nth-child(1) { width: 36%; }
+.gpu-section .data-table th:nth-child(2), .gpu-section .data-table th:nth-child(3) { width: 20%; }
+.gpu-model { display: inline-flex; align-items: center; gap: 9px; }
+.gpu-model > span, .gpu-model strong, .gpu-model small { display: block; }
+.gpu-model strong { color: var(--ink); font-size: 12px; }
+.gpu-model small { margin-top: 2px; color: var(--muted); font-size: 11px; }
+.gpu-meter { min-width: 120px; }
+.gpu-meter strong { display: block; margin-bottom: 6px; color: var(--ink); font-size: 11px; }
+.gpu-cell-label { display: none; }
 .selected-network-row td { background: var(--green-soft); }
 .network-select-button { min-width: 66px; height: 30px; padding: 0 9px; border: 1px solid var(--control-line); border-radius: 4px; background: var(--surface); color: var(--ink); cursor: pointer; font-size: 11px; font-weight: 650; }
 .network-select-button:hover { border-color: var(--green); color: var(--green); }
@@ -331,6 +341,16 @@ button { color: inherit; }
   .node-form { grid-template-columns: 1fr; }
   .field, .field-wide { grid-column: 1; }
   .install-result-head { align-items: flex-start; flex-direction: column; }
+  .gpu-section .data-table { min-width: 0; }
+  .gpu-section .data-table thead { display: none; }
+  .gpu-section .data-table tbody { display: grid; gap: 10px; padding: 10px; }
+  .gpu-section .data-table tr { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; border: 1px solid var(--line-soft); border-radius: 5px; }
+  .gpu-section .data-table td { min-width: 0; padding: 10px; white-space: normal; border-bottom: 0; }
+  .gpu-section .data-table td:first-child, .gpu-section .data-table td:last-child { grid-column: 1 / -1; }
+  .gpu-section .data-table td:first-child { border-bottom: 1px solid var(--line-soft); background: var(--surface-subtle); }
+  .gpu-section .data-table td:last-child { padding-top: 0; color: var(--muted); }
+  .gpu-meter { min-width: 0; }
+  .gpu-cell-label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 10px; font-weight: 650; text-transform: uppercase; }
 }
 
 @media (prefers-reduced-motion: reduce) {

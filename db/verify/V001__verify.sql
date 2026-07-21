@@ -172,6 +172,26 @@ VALUES (
     '80000000-0000-0000-0000-000000000001'
 );
 
+INSERT INTO monitoring.gpu_devices (
+    id, node_id, hardware_key, device_index, gpu_uuid, model_name,
+    memory_total_bytes, first_seen_at, last_seen_at
+) VALUES
+    ('a0000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001',
+     'GPU-verify-0', 0, 'GPU-verify-0', 'NVIDIA Verify GPU 0', 12884901888,
+     CURRENT_TIMESTAMP - INTERVAL '1 day', CURRENT_TIMESTAMP),
+    ('a0000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001',
+     'GPU-verify-1', 1, 'GPU-verify-1', 'NVIDIA Verify GPU 1', 25769803776,
+     CURRENT_TIMESTAMP - INTERVAL '1 day', CURRENT_TIMESTAMP);
+
+INSERT INTO monitoring.gpu_current_metrics (
+    node_id, gpu_id, bucket_at, collected_at, received_at,
+    utilization_percent, memory_used_bytes
+) VALUES
+    ('10000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001',
+     date_trunc('minute', CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 25, 3221225472),
+    ('10000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000002',
+     date_trunc('minute', CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 80, 21474836480);
+
 INSERT INTO monitoring.node_metric_samples (
     bucket_at, node_id, collected_at, interval_seconds,
     cpu_usage_percent, load_1, load_5, load_15,
@@ -339,6 +359,25 @@ BEGIN
         RAISE EXCEPTION 'dashboard network preference was not persisted';
     END IF;
 
+    SELECT count(*) INTO v_count
+      FROM monitoring.gpu_devices gpu
+      JOIN monitoring.gpu_current_metrics metric
+        ON metric.node_id = gpu.node_id AND metric.gpu_id = gpu.id
+     WHERE gpu.node_id = '10000000-0000-0000-0000-000000000001'
+       AND gpu.removed_at IS NULL;
+    IF v_count <> 2 THEN
+        RAISE EXCEPTION 'per-device GPU metrics are incomplete: %', v_count;
+    END IF;
+
+    SELECT memory_used_bytes::numeric * 100 / memory_total_bytes INTO v_number
+      FROM monitoring.gpu_devices gpu
+      JOIN monitoring.gpu_current_metrics metric
+        ON metric.node_id = gpu.node_id AND metric.gpu_id = gpu.id
+     WHERE gpu.id = 'a0000000-0000-0000-0000-000000000002';
+    IF round(v_number, 1) <> 83.3 THEN
+        RAISE EXCEPTION 'GPU memory utilization is incorrect: %', v_number;
+    END IF;
+
     IF EXISTS (
         SELECT 1 FROM monitoring.node_api_tokens
          WHERE token_digest = decode(repeat('cd', 32), 'hex')
@@ -484,6 +523,12 @@ BEGIN
     END IF;
     IF NOT has_table_privilege('server_status_writer', 'monitoring.node_network_preferences', 'INSERT') THEN
         RAISE EXCEPTION 'writer role lacks INSERT on dashboard network preferences';
+    END IF;
+    IF NOT has_table_privilege('server_status_writer', 'monitoring.gpu_current_metrics', 'INSERT') THEN
+        RAISE EXCEPTION 'writer role lacks INSERT on GPU current metrics';
+    END IF;
+    IF has_table_privilege('server_status_reader', 'monitoring.gpu_current_metrics', 'INSERT') THEN
+        RAISE EXCEPTION 'reader role can modify GPU current metrics';
     END IF;
     IF has_table_privilege('server_status_reader', 'monitoring.node_network_preferences', 'INSERT') THEN
         RAISE EXCEPTION 'reader role can modify dashboard network preferences';

@@ -25,6 +25,8 @@ curl http://10.12.54.200:8080/readyz
 
 数据库使用专用登录角色 `server_status_app`，该角色只继承 `server_status_writer`，没有超级用户、建库或建角色权限。
 
+升级到包含 GPU 监控的版本前，使用迁移账号执行 `db/migrations/V005__nvidia_gpu_metrics.sql`。中央服务启动时只校验 V005 是否存在，不会使用运行时 writer 账号自动修改 schema。
+
 ## 节点 Agent
 
 新节点的推荐接入方式是在中心看板点击“添加节点”，填写显示名称与环境后，在目标 Linux 节点执行生成的命令。安装器只访问中心节点，由中心按需从 GitHub Release 下载、校验并持久缓存 `amd64` 或 `arm64` 静态二进制；因此目标节点无需访问 GitHub。安装器会再次校验 SHA-256，随后以 root 安装到：

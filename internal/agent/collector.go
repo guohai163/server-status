@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"net"
@@ -97,6 +98,7 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 	if err != nil {
 		return report.Report{}, err
 	}
+	gpus, gpuMetrics := collectNVIDIAGPUs(ctx)
 
 	now := time.Now().UTC()
 	collector.mu.Lock()
@@ -136,6 +138,7 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 			BlockDevices:      blockDevices,
 			Filesystems:       filesystems,
 			NetworkInterfaces: networkInterfaces,
+			GPUs:              gpus,
 		},
 		Metrics: report.Metrics{
 			CPU: report.CPUMetrics{
@@ -157,6 +160,7 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 			Disk:        diskMetrics,
 			Filesystems: filesystemMetrics,
 			Network:     networkMetrics,
+			GPUs:        gpuMetrics,
 		},
 	}
 	report.NormalizeInventory(&payload.Inventory)
@@ -165,6 +169,65 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 		return report.Report{}, fmt.Errorf("fingerprint inventory: %w", err)
 	}
 	return payload, nil
+}
+
+func collectNVIDIAGPUs(ctx context.Context) ([]report.GPU, []report.GPUMetrics) {
+	path, err := exec.LookPath("nvidia-smi")
+	if err != nil {
+		return nil, nil
+	}
+	commandContext, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(commandContext, path,
+		"--query-gpu=uuid,name,index,utilization.gpu,memory.used,memory.total",
+		"--format=csv,noheader,nounits").Output()
+	if err != nil {
+		return nil, nil
+	}
+	return parseNVIDIASMI(string(output))
+}
+
+func parseNVIDIASMI(output string) ([]report.GPU, []report.GPUMetrics) {
+	reader := csv.NewReader(strings.NewReader(output))
+	reader.TrimLeadingSpace = true
+	reader.FieldsPerRecord = -1
+	rows, err := reader.ReadAll()
+	if err != nil {
+		return nil, nil
+	}
+	type gpuSample struct {
+		inventory report.GPU
+		metric    report.GPUMetrics
+	}
+	samples := make([]gpuSample, 0, len(rows))
+	for _, row := range rows {
+		if len(row) != 6 {
+			continue
+		}
+		for index := range row {
+			row[index] = strings.TrimSpace(row[index])
+		}
+		gpuIndex, indexErr := strconv.Atoi(row[2])
+		utilization, utilizationErr := strconv.ParseFloat(row[3], 64)
+		memoryUsedMiB, usedErr := strconv.ParseUint(row[4], 10, 64)
+		memoryTotalMiB, totalErr := strconv.ParseUint(row[5], 10, 64)
+		if row[0] == "" || row[1] == "" || indexErr != nil || utilizationErr != nil || usedErr != nil || totalErr != nil || memoryTotalMiB == 0 {
+			continue
+		}
+		const mebibyte = uint64(1024 * 1024)
+		samples = append(samples, gpuSample{
+			inventory: report.GPU{Key: row[0], UUID: row[0], ModelName: row[1], Index: gpuIndex, MemoryTotalBytes: memoryTotalMiB * mebibyte},
+			metric:    report.GPUMetrics{GPUKey: row[0], UtilizationPercent: utilization, MemoryUsedBytes: memoryUsedMiB * mebibyte},
+		})
+	}
+	sort.Slice(samples, func(i, j int) bool { return samples[i].inventory.Index < samples[j].inventory.Index })
+	inventory := make([]report.GPU, 0, len(samples))
+	metrics := make([]report.GPUMetrics, 0, len(samples))
+	for _, sample := range samples {
+		inventory = append(inventory, sample.inventory)
+		metrics = append(metrics, sample.metric)
+	}
+	return inventory, metrics
 }
 
 func classifyMachineType(virtualizationRole string) string {

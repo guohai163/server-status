@@ -21,6 +21,7 @@ type NodeSummary struct {
 	AgentVersion          string            `json:"agent_version"`
 	Labels                map[string]string `json:"labels"`
 	MachineType           string            `json:"machine_type,omitempty"`
+	HasNVIDIAGPU          bool              `json:"has_nvidia_gpu"`
 	LastSeenAt            time.Time         `json:"last_seen_at"`
 	Status                string            `json:"status"`
 	PrimaryIP             string            `json:"primary_ip,omitempty"`
@@ -111,11 +112,24 @@ type BlockDeviceHardware struct {
 	Rotational   *bool  `json:"rotational,omitempty"`
 }
 
+type GPUStatus struct {
+	GPUDeviceID        string     `json:"gpu_device_id"`
+	Index              int        `json:"index"`
+	UUID               string     `json:"uuid"`
+	ModelName          string     `json:"model_name"`
+	BucketAt           *time.Time `json:"bucket_at,omitempty"`
+	UtilizationPercent float64    `json:"utilization_percent"`
+	MemoryTotalBytes   int64      `json:"memory_total_bytes"`
+	MemoryUsedBytes    int64      `json:"memory_used_bytes"`
+	MemoryUsagePercent float64    `json:"memory_usage_percent"`
+}
+
 type NodeDetail struct {
 	Node          NodeSummary           `json:"node"`
 	CPUPackages   []CPUHardware         `json:"cpu_packages"`
 	MemoryModules []MemoryHardware      `json:"memory_modules"`
 	BlockDevices  []BlockDeviceHardware `json:"block_devices"`
+	GPUs          []GPUStatus           `json:"gpus"`
 	Filesystems   []FilesystemStatus    `json:"filesystems"`
 	Network       []NetworkStatus       `json:"network"`
 }
@@ -187,9 +201,13 @@ func (store *Store) GetNode(ctx context.Context, nodeID string) (NodeDetail, err
 	if err != nil {
 		return NodeDetail{}, err
 	}
+	gpus, err := store.listGPUs(ctx, nodeID)
+	if err != nil {
+		return NodeDetail{}, err
+	}
 	return NodeDetail{
 		Node: summary, CPUPackages: cpuPackages, MemoryModules: memoryModules,
-		BlockDevices: blockDevices, Filesystems: filesystems, Network: network,
+		BlockDevices: blockDevices, GPUs: gpus, Filesystems: filesystems, Network: network,
 	}, nil
 }
 
@@ -211,6 +229,10 @@ const nodeSummarySQL = `
 		status.agent_version,
 		status.labels,
 		COALESCE(status.labels->>'server_status.machine_type', ''),
+		EXISTS (
+			SELECT 1 FROM monitoring.gpu_devices gpu
+			 WHERE gpu.node_id = status.node_id AND gpu.removed_at IS NULL
+		),
 		status.last_seen_at,
 		status.status,
 		COALESCE(CASE WHEN primary_address.is_preferred THEN primary_address.address END,
@@ -295,7 +317,7 @@ func scanNodeSummary(row scanner) (NodeSummary, error) {
 	err := row.Scan(
 		&item.NodeID, &item.AgentID, &item.Hostname, &item.DisplayName,
 		&item.OSName, &item.OSVersion, &item.Architecture, &item.AgentVersion,
-		&labelsJSON, &item.MachineType,
+		&labelsJSON, &item.MachineType, &item.HasNVIDIAGPU,
 		&item.LastSeenAt, &item.Status, &item.PrimaryIP, &item.SecondsSinceLastSeen,
 		&item.LatestBucketAt, &item.CPUUsagePercent, &item.Load1, &item.Load5, &item.Load15,
 		&item.MemoryTotalBytes, &item.MemoryUsedBytes, &item.MemoryUsagePercent, &item.UptimeSeconds,
@@ -466,6 +488,44 @@ func (store *Store) listBlockDevices(ctx context.Context, nodeID string) ([]Bloc
 		result = append(result, item)
 	}
 	return result, rows.Err()
+}
+
+func (store *Store) listGPUs(ctx context.Context, nodeID string) ([]GPUStatus, error) {
+	rows, err := store.pool.Query(ctx, `
+		SELECT gpu.id::text, gpu.device_index, gpu.gpu_uuid, gpu.model_name,
+		       current.bucket_at,
+		       COALESCE(current.utilization_percent, 0)::double precision,
+		       gpu.memory_total_bytes,
+		       COALESCE(current.memory_used_bytes, 0),
+		       CASE WHEN gpu.memory_total_bytes = 0 THEN 0
+		            ELSE COALESCE(current.memory_used_bytes, 0)::numeric * 100 / gpu.memory_total_bytes
+		       END::double precision
+		  FROM monitoring.gpu_devices gpu
+		  LEFT JOIN monitoring.gpu_current_metrics current
+		    ON current.node_id = gpu.node_id AND current.gpu_id = gpu.id
+		 WHERE gpu.node_id = $1::uuid AND gpu.removed_at IS NULL
+		 ORDER BY gpu.device_index, gpu.gpu_uuid
+	`, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("query GPU status: %w", err)
+	}
+	defer rows.Close()
+	result := make([]GPUStatus, 0)
+	for rows.Next() {
+		var item GPUStatus
+		if err := rows.Scan(
+			&item.GPUDeviceID, &item.Index, &item.UUID, &item.ModelName,
+			&item.BucketAt, &item.UtilizationPercent, &item.MemoryTotalBytes,
+			&item.MemoryUsedBytes, &item.MemoryUsagePercent,
+		); err != nil {
+			return nil, fmt.Errorf("scan GPU status: %w", err)
+		}
+		result = append(result, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate GPU status: %w", err)
+	}
+	return result, nil
 }
 
 var historyDurations = map[string]time.Duration{
