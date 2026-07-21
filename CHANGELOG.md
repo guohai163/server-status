@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## v0.10.0 - 2026-07-21
+
+### Added
+- Add an operating-system filter to the node dashboard that combines with the existing Tag filter.
+
+### Changed
+- Build the Windows Agent with Go 1.20.14 for Windows Server 2008 R2 and later, using an isolated module and the official `x/sys/windows/svc` service lifecycle.
+- Publish Windows Agent releases for `amd64`, matching the 64-bit-only Windows Server 2008 R2 baseline.
+
+### Fixed
+- Remove the Go 1.10 native service callback bridge that could leave the Agent indefinitely in `START_PENDING`.
 
 ## v0.8.0 - 2026-07-21
 

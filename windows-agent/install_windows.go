@@ -23,9 +23,11 @@ const (
 )
 
 var (
-	procConvertStringSecurityDescriptorToSecurityDescriptorW = advapi32.NewProc("ConvertStringSecurityDescriptorToSecurityDescriptorW")
-	procSetFileSecurityW                                     = advapi32.NewProc("SetFileSecurityW")
-	procLocalFree                                            = kernel32.NewProc("LocalFree")
+	installAdvapi32                                          = syscall.NewLazyDLL("advapi32.dll")
+	installKernel32                                          = syscall.NewLazyDLL("kernel32.dll")
+	procConvertStringSecurityDescriptorToSecurityDescriptorW = installAdvapi32.NewProc("ConvertStringSecurityDescriptorToSecurityDescriptorW")
+	procSetFileSecurityW                                     = installAdvapi32.NewProc("SetFileSecurityW")
+	procLocalFree                                            = installKernel32.NewProc("LocalFree")
 )
 
 func defaultInstallDirectory() string {
