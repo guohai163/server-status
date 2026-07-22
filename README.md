@@ -20,6 +20,7 @@ Server Status 是一个面向 Linux 服务器的轻量监控系统，由节点 A
 
 | 类别 | 硬件/清单信息 | 每分钟运行指标 |
 | --- | --- | --- |
+| 服务器 | 实体机型号（SMBIOS Product Name / SKU） | -- |
 | CPU | 厂商、型号、封装数、物理核心、逻辑线程 | 总使用率、1/5/15 分钟 load |
 | 内存 | 插槽、厂商、型号、序列号、类型、容量、速率 | 总量、已用、可用、缓存、buffer、swap |
 | 磁盘 | 设备名、厂商、型号、序列号、WWN、介质类型、容量 | 挂载点容量和 inode、整机磁盘读写字节与 IOPS 增量 |
@@ -39,7 +40,7 @@ Server Status 是一个面向 Linux 服务器的轻量监控系统，由节点 A
 5. 使用节点专属 Bearer Token 将完整 JSON 快照发送到中心 `/api/v1/reports`。
 6. 网络错误、HTTP 429 或 5xx 会在本采集周期内短退避重试最多 3 次；认证和数据校验类 4xx 不重试。持续失败也不会退出进程，下一个采集周期继续尝试。
 
-普通用户无法读取 DMI 或虚拟机没有公开设备型号时，Agent 会明确使用 `System Memory (DMI unavailable)`、`Virtio Block Device (vda)` 等回退名称，同时继续上报可验证的数量、容量和使用率，不伪造厂商型号。
+普通用户无法读取 DMI 或虚拟机没有公开设备型号时，Agent 会明确使用 `System Memory (DMI unavailable)`、`Virtio Block Device (vda)` 等回退名称，同时继续上报可验证的数量、容量和使用率，不伪造厂商型号。实体机可读取 DMI 时，详情页还会显示服务器型号；例如 `ThinkSystem SR630 -[7X02CTO1WW]-`。
 
 ### 中心服务
 
@@ -181,7 +182,7 @@ curl http://127.0.0.1:8080/readyz
 
 中心容器使用非 root 用户、只读根文件系统、移除全部 capabilities，并配置 `unless-stopped` 自动恢复。Compose 会挂载独立的 `agent_release_cache` 持久卷，用于缓存 Agent Release 资产。
 
-部署完成后直接访问 `http://中心节点地址:8080/`。Web 看板不需要登录：首屏以卡片显示所有节点的机器名、IP、Tag、CPU、内存、磁盘使用率和磁盘读写速率，并可在页面顶部按 Tag 筛选；点击卡片进入硬件、文件系统、网卡和历史趋势详情，GPU 节点会按每张卡分别显示核心和显存使用率趋势。每个节点最多设置 5 个 Tag。节点上报和管理接口仍分别使用 Node Token 与 Admin Token。浏览器在 Admin Token 成功通过鉴权后会将其保存到本地 30 天，期间添加节点、编辑 Tag 和选择首页 IP 无需重复填写；过期或接口返回 401 时自动清除。
+部署完成后直接访问 `http://中心节点地址:8080/`。Web 看板不需要登录：首屏以卡片显示所有节点的机器名、IP、Tag、CPU、内存、磁盘使用率和磁盘读写速率，并可在页面顶部按 Tag 筛选；点击卡片进入硬件、文件系统、网卡和历史趋势详情，GPU 节点会按每张卡分别显示核心和显存使用率趋势。每个节点最多设置 5 个 Tag。使用 Admin Token 可从顶部导出全部机器的 Excel 清单，包含概览以及 CPU、内存、磁盘、文件系统、网卡和 GPU 明细。节点上报和管理接口仍分别使用 Node Token 与 Admin Token。浏览器在 Admin Token 成功通过鉴权后会将其保存到本地 30 天，期间添加节点、编辑 Tag、选择首页 IP 和导出无需重复填写；过期或接口返回 401 时自动清除。
 
 ## 一个脚本部署 Agent
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.12.0 - 2026-07-22
+
+### Added
+- Export all monitored machines to an Admin Token-protected Excel workbook with overview, CPU, memory, disk, filesystem, network, and GPU worksheets.
+- Collect the SMBIOS product name and SKU for physical Linux servers and show the server model in node details.
+
+### Fixed
+- Deduplicate multiple mount points for the same filesystem UUID so inventory and metric reports do not contain duplicate filesystem keys.
+
 ## v0.11.0 - 2026-07-21
 
 ### Added

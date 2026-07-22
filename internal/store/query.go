@@ -22,6 +22,7 @@ type NodeSummary struct {
 	Labels                map[string]string `json:"labels"`
 	Tags                  []string          `json:"tags"`
 	MachineType           string            `json:"machine_type,omitempty"`
+	SystemModel           string            `json:"system_model,omitempty"`
 	HasNVIDIAGPU          bool              `json:"has_nvidia_gpu"`
 	LastSeenAt            time.Time         `json:"last_seen_at"`
 	Status                string            `json:"status"`
@@ -246,6 +247,7 @@ const nodeSummarySQL = `
 		status.labels,
 		node.tags,
 		COALESCE(status.labels->>'server_status.machine_type', ''),
+		COALESCE(status.labels->>'server_status.system_model', ''),
 		EXISTS (
 			SELECT 1 FROM monitoring.gpu_devices gpu
 			 WHERE gpu.node_id = status.node_id AND gpu.removed_at IS NULL
@@ -335,7 +337,7 @@ func scanNodeSummary(row scanner) (NodeSummary, error) {
 	err := row.Scan(
 		&item.NodeID, &item.AgentID, &item.Hostname, &item.DisplayName,
 		&item.OSName, &item.OSVersion, &item.Architecture, &item.AgentVersion,
-		&labelsJSON, &item.Tags, &item.MachineType, &item.HasNVIDIAGPU,
+		&labelsJSON, &item.Tags, &item.MachineType, &item.SystemModel, &item.HasNVIDIAGPU,
 		&item.LastSeenAt, &item.Status, &item.PrimaryIP, &item.SecondsSinceLastSeen,
 		&item.LatestBucketAt, &item.CPUUsagePercent, &item.Load1, &item.Load5, &item.Load15,
 		&item.MemoryTotalBytes, &item.MemoryUsedBytes, &item.MemoryUsagePercent, &item.UptimeSeconds,

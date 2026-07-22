@@ -4,6 +4,7 @@
   const app = document.getElementById("app");
   const refreshButton = document.getElementById("refresh-button");
   const updatedAt = document.getElementById("updated-at");
+  const exportButton = document.getElementById("export-button");
   const addNodeButton = document.getElementById("add-node-button");
   const addNodeDialog = document.getElementById("add-node-dialog");
   const addNodeForm = document.getElementById("add-node-form");
@@ -12,6 +13,11 @@
   const installCommandResult = document.getElementById("install-command-result");
   const installCommand = document.getElementById("install-command");
   const copyInstallCommand = document.getElementById("copy-install-command");
+  const exportDialog = document.getElementById("export-dialog");
+  const exportForm = document.getElementById("export-form");
+  const exportAdminToken = document.getElementById("export-admin-token");
+  const exportError = document.getElementById("export-error");
+  const confirmExport = document.getElementById("confirm-export");
   const networkPreferenceDialog = document.getElementById("network-preference-dialog");
   const networkPreferenceForm = document.getElementById("network-preference-form");
   const networkPreferenceContext = document.getElementById("network-preference-context");
@@ -367,7 +373,7 @@
       </div>
       <div class="chart-grid gpu-history-grid" id="gpu-history-grid"></div>
     </section>
-    <section class="section"><div class="section-head"><div><h2>硬件信息</h2><p>${escapeHTML(node.architecture)} · Agent ${escapeHTML(node.agent_version)}</p></div></div>
+    <section class="section"><div class="section-head"><div><h2>硬件信息</h2><p>${node.system_model ? `服务器型号：${escapeHTML(node.system_model)} · ` : ""}${escapeHTML(node.architecture)} · Agent ${escapeHTML(node.agent_version)}</p></div></div>
       <div class="info-grid">
         <div class="info-block"><h3>CPU</h3>${cpuTable(detail.cpu_packages)}</div>
         <div class="info-block"><h3>内存</h3>${memoryTable(detail.memory_modules)}</div>
@@ -833,6 +839,58 @@
     copyInstallCommand.textContent = "已复制";
   }
 
+  async function downloadNodeExport(token) {
+    exportButton.disabled = true;
+    exportButton.textContent = "正在导出";
+    try {
+      const response = await fetch("/api/v1/admin/nodes/export", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) {
+        let message = `导出失败 (${response.status})`;
+        try { message = (await response.json()).error || message; } catch (_) { /* response is not JSON */ }
+        if (response.status === 401) clearStoredAdminToken();
+        throw new Error(message);
+      }
+      const workbook = await response.blob();
+      const url = URL.createObjectURL(workbook);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `server-status-nodes-${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "")}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      rememberAdminToken(token);
+    } finally {
+      exportButton.disabled = false;
+      exportButton.textContent = "导出 Excel";
+    }
+  }
+
+  function closeExportDialog() {
+    exportDialog.close();
+  }
+
+  async function submitExport(event) {
+    event.preventDefault();
+    if (!exportForm.reportValidity()) return;
+    const token = exportAdminToken.value.trim();
+    exportError.hidden = true;
+    confirmExport.disabled = true;
+    confirmExport.textContent = "正在导出";
+    try {
+      await downloadNodeExport(token);
+      closeExportDialog();
+    } catch (error) {
+      exportError.textContent = error.message;
+      exportError.hidden = false;
+    } finally {
+      confirmExport.disabled = false;
+      confirmExport.textContent = "下载 Excel";
+    }
+  }
+
   function route() {
     clearInterval(refreshTimer);
     const match = location.hash.match(/^#node\/([0-9a-f-]+)$/i);
@@ -855,6 +913,34 @@
     addNodeDialog.showModal();
     document.getElementById("admin-token").focus();
   });
+  exportButton.addEventListener("click", async () => {
+    const token = currentAdminToken();
+    if (!token) {
+      exportAdminToken.value = "";
+      exportError.hidden = true;
+      exportError.textContent = "";
+      exportDialog.showModal();
+      exportAdminToken.focus();
+      return;
+    }
+    try {
+      await downloadNodeExport(token);
+    } catch (error) {
+      exportError.textContent = error.message;
+      exportError.hidden = false;
+      exportDialog.showModal();
+      exportAdminToken.value = "";
+      exportAdminToken.focus();
+    }
+  });
+  document.getElementById("close-export-dialog").addEventListener("click", closeExportDialog);
+  exportDialog.querySelector("[data-close-export]").addEventListener("click", closeExportDialog);
+  exportDialog.addEventListener("close", () => {
+    exportAdminToken.value = "";
+    exportError.hidden = true;
+    exportError.textContent = "";
+  });
+  exportForm.addEventListener("submit", submitExport);
   document.getElementById("close-node-dialog").addEventListener("click", closeAddNodeDialog);
   addNodeDialog.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", closeAddNodeDialog));
   addNodeDialog.addEventListener("close", resetAddNodeDialog);

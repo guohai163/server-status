@@ -16,6 +16,7 @@
       </a>
       <div class="topbar-actions">
         <span id="updated-at" class="updated-at"></span>
+        <button id="export-button" class="command-button" type="button">导出 Excel</button>
         <button id="add-node-button" class="command-button" type="button">添加节点</button>
         <button id="refresh-button" class="icon-button" type="button" title="刷新数据" aria-label="刷新数据">↻</button>
       </div>
@@ -71,6 +72,23 @@
         <button class="primary-button" type="button" data-close-dialog>完成</button>
       </div>
     </div>
+  </dialog>
+  <dialog id="export-dialog" class="preference-dialog" aria-labelledby="export-title">
+    <div class="dialog-head">
+      <div><h2 id="export-title">导出机器信息</h2></div>
+      <button id="close-export-dialog" class="icon-button" type="button" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <form id="export-form" class="preference-form">
+      <label class="field">
+        <span>Admin Token</span>
+        <input id="export-admin-token" name="admin_token" type="password" required autocomplete="off" spellcheck="false">
+      </label>
+      <p id="export-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="secondary-button" type="button" data-close-export>取消</button>
+        <button id="confirm-export" class="primary-button" type="submit">下载 Excel</button>
+      </div>
+    </form>
   </dialog>
   <dialog id="network-preference-dialog" class="preference-dialog" aria-labelledby="network-preference-title">
     <div class="dialog-head">

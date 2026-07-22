@@ -23,6 +23,7 @@ var (
 
 const (
 	machineTypeLabelKey = "server_status.machine_type"
+	systemModelLabelKey = "server_status.system_model"
 	primaryIPLabelKey   = "server_status.primary_ip"
 )
 

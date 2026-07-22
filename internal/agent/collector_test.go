@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/guohai/server-status/internal/report"
@@ -81,6 +82,24 @@ func TestClassifyMachineType(t *testing.T) {
 	}
 }
 
+func TestFormatSystemModel(t *testing.T) {
+	tests := []struct {
+		name, productName, productSKU, want string
+	}{
+		{name: "product and SKU", productName: "ThinkSystem SR630", productSKU: "7X02CTO1WW", want: "ThinkSystem SR630 -[7X02CTO1WW]-"},
+		{name: "product only", productName: "PowerEdge R650", want: "PowerEdge R650"},
+		{name: "unavailable product", productName: "Not Specified", productSKU: "7X02CTO1WW", want: ""},
+		{name: "unavailable SKU", productName: "ThinkSystem SR630", productSKU: "None", want: "ThinkSystem SR630"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := formatSystemModel(test.productName, test.productSKU); got != test.want {
+				t.Fatalf("formatSystemModel() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestBlockDeviceKind(t *testing.T) {
 	if blockDeviceKind("md0") != "raid" || blockDeviceKind("dm-0") != "virtual" || blockDeviceKind("nvme0n1") != "disk" {
 		t.Fatal("block device kind classification is incorrect")
@@ -104,6 +123,51 @@ func TestDiskCounterDeltaAggregation(t *testing.T) {
 	})
 	if metric.ReadBytesDelta != 60 || metric.WriteBytesDelta != 90 || metric.ReadOpsDelta != 3 || metric.WriteOpsDelta != 2 {
 		t.Fatalf("unexpected disk deltas: %+v", metric)
+	}
+}
+
+func TestCollectFilesystemStatsDeduplicatesUUID(t *testing.T) {
+	partitions := []disk.PartitionStat{
+		{Device: "/dev/sdb1", Mountpoint: "/data0", Fstype: "ext4"},
+		{Device: "/dev/sdb1", Mountpoint: "/log0", Fstype: "ext4"},
+		{Device: "/dev/sdb1", Mountpoint: "/backup0", Fstype: "ext4"},
+	}
+	usageCalls := 0
+	inventory, metrics, err := collectFilesystemStats(partitions, map[string]string{
+		"/dev/sdb1": "f5dbe7ae-4f59-4731-aa7a-6ab4595dab77",
+	}, func(string) (*disk.UsageStat, error) {
+		usageCalls++
+		return &disk.UsageStat{Total: 1000, Used: 400, Free: 600}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory) != 1 || len(metrics) != 1 || usageCalls != 1 {
+		t.Fatalf("expected one filesystem sample, got inventory=%d metrics=%d usage_calls=%d", len(inventory), len(metrics), usageCalls)
+	}
+	if inventory[0].Key != "f5dbe7ae-4f59-4731-aa7a-6ab4595dab77" || inventory[0].MountPoint != "/data0" {
+		t.Fatalf("unexpected filesystem: %+v", inventory[0])
+	}
+}
+
+func TestCollectFilesystemStatsRetriesDuplicateUUIDAfterUsageFailure(t *testing.T) {
+	partitions := []disk.PartitionStat{
+		{Device: "/dev/sdb1", Mountpoint: "/data0", Fstype: "ext4"},
+		{Device: "/dev/sdb1", Mountpoint: "/log0", Fstype: "ext4"},
+	}
+	inventory, metrics, err := collectFilesystemStats(partitions, map[string]string{
+		"/dev/sdb1": "filesystem-uuid",
+	}, func(mountpoint string) (*disk.UsageStat, error) {
+		if mountpoint == "/data0" {
+			return nil, errors.New("unavailable")
+		}
+		return &disk.UsageStat{Total: 1000, Used: 400, Free: 600}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory) != 1 || len(metrics) != 1 || inventory[0].MountPoint != "/log0" {
+		t.Fatalf("expected fallback mountpoint, got inventory=%+v metrics=%+v", inventory, metrics)
 	}
 }
 

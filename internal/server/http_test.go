@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ type fakeStore struct {
 	ingested                    bool
 	registered                  bool
 	nodes                       []store.NodeSummary
+	nodeDetails                 map[string]store.NodeDetail
 	primaryNetworkNodeID        string
 	primaryNetworkInterfaceID   string
 	primaryNetworkPreferenceErr error
@@ -45,7 +47,11 @@ func (fake *fakeStore) RegisterNode(context.Context, store.RegisterNodeInput) (s
 func (fake *fakeStore) ListNodes(context.Context) ([]store.NodeSummary, error) {
 	return fake.nodes, nil
 }
-func (fake *fakeStore) GetNode(context.Context, string) (store.NodeDetail, error) {
+
+func (fake *fakeStore) GetNode(_ context.Context, nodeID string) (store.NodeDetail, error) {
+	if detail, ok := fake.nodeDetails[nodeID]; ok {
+		return detail, nil
+	}
 	return store.NodeDetail{}, store.ErrNotFound
 }
 func (fake *fakeStore) SetPrimaryNetworkInterface(_ context.Context, nodeID, interfaceID string) error {
@@ -205,6 +211,40 @@ func TestPublicNodeListIncludesLoadAveragesAndCapacities(t *testing.T) {
 	}
 	if len(payload.Nodes[0].Tags) != 2 || payload.Nodes[0].Tags[1] != "gpu" {
 		t.Fatalf("unexpected node tags: %+v", payload.Nodes[0].Tags)
+	}
+}
+
+func TestNodeExportRequiresAdminToken(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/nodes/export", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestNodeExportReturnsExcelWorkbook(t *testing.T) {
+	api, database := testAPI()
+	nodeID := "10000000-0000-4000-8000-000000000001"
+	summary := store.NodeSummary{NodeID: nodeID, AgentID: "20000000-0000-4000-8000-000000000001", DisplayName: "生产节点", Hostname: "server-01", SystemModel: "ThinkSystem SR630 -[7X02CTO1WW]-"}
+	database.nodes = []store.NodeSummary{summary}
+	database.nodeDetails = map[string]store.NodeDetail{nodeID: {Node: summary}}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/nodes/export", nil)
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	if contentType := response.Header().Get("Content-Type"); contentType != spreadsheetContentType {
+		t.Fatalf("unexpected content type: %q", contentType)
+	}
+	if !strings.Contains(response.Header().Get("Content-Disposition"), "server-status-nodes-") {
+		t.Fatalf("unexpected content disposition: %q", response.Header().Get("Content-Disposition"))
+	}
+	if response.Body.Len() == 0 {
+		t.Fatal("expected workbook response body")
 	}
 }
 

@@ -129,6 +129,7 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 			Architecture:  runtime.GOARCH,
 			AgentVersion:  Version,
 			MachineType:   classifyMachineType(hostInfo.VirtualizationRole),
+			SystemModel:   collectSystemModel(hostInfo.VirtualizationRole),
 			PrimaryIP:     preferredBridgeIPv4(networkInterfaces, isBridgeInterface),
 			Labels:        config.Labels,
 		},
@@ -235,6 +236,29 @@ func classifyMachineType(virtualizationRole string) string {
 		return "virtual"
 	}
 	return "physical"
+}
+
+// collectSystemModel reads SMBIOS type 1 values when exposed by the Linux kernel.
+func collectSystemModel(virtualizationRole string) string {
+	if classifyMachineType(virtualizationRole) != "physical" {
+		return ""
+	}
+	return formatSystemModel(
+		readTrimmed("/sys/class/dmi/id/product_name"),
+		readTrimmed("/sys/class/dmi/id/product_sku"),
+	)
+}
+
+func formatSystemModel(productName, productSKU string) string {
+	productName = cleanDMIValue(productName)
+	productSKU = cleanDMIValue(productSKU)
+	if productName == "" {
+		return ""
+	}
+	if productSKU == "" {
+		return productName
+	}
+	return fmt.Sprintf("%s -[%s]-", productName, productSKU)
 }
 
 func (collector *Collector) collectDisk(ctx context.Context, devices []report.BlockDevice) (report.DiskMetrics, error) {
@@ -433,11 +457,12 @@ func parseLeadingInt(value string) int {
 }
 
 func cleanDMIValue(value string) string {
-	switch strings.TrimSpace(value) {
-	case "", "Unknown", "Not Specified", "No Module Installed":
+	value = strings.TrimSpace(value)
+	switch strings.ToLower(value) {
+	case "", "unknown", "not specified", "no module installed", "none", "to be filled by o.e.m.":
 		return ""
 	default:
-		return strings.TrimSpace(value)
+		return value
 	}
 }
 
@@ -513,25 +538,35 @@ func collectFilesystems(ctx context.Context) ([]report.Filesystem, []report.File
 	if err != nil {
 		return nil, nil, fmt.Errorf("collect filesystem inventory: %w", err)
 	}
-	uuidByDevice := filesystemUUIDs()
+	return collectFilesystemStats(partitions, filesystemUUIDs(), func(mountpoint string) (*disk.UsageStat, error) {
+		return disk.UsageWithContext(ctx, mountpoint)
+	})
+}
+
+func collectFilesystemStats(partitions []disk.PartitionStat, uuidByDevice map[string]string, usageForMountpoint func(string) (*disk.UsageStat, error)) ([]report.Filesystem, []report.FilesystemMetrics, error) {
 	inventory := make([]report.Filesystem, 0, len(partitions))
 	metrics := make([]report.FilesystemMetrics, 0, len(partitions))
-	seen := make(map[string]struct{})
+	seenMountpoints := make(map[string]struct{})
+	seenKeys := make(map[string]struct{})
 	for _, partition := range partitions {
-		if _, ok := seen[partition.Mountpoint]; ok {
+		if _, ok := seenMountpoints[partition.Mountpoint]; ok {
 			continue
 		}
-		usage, err := disk.UsageWithContext(ctx, partition.Mountpoint)
-		if err != nil {
-			continue
-		}
-		seen[partition.Mountpoint] = struct{}{}
 		device := canonicalDevice(partition.Device)
 		uuid := uuidByDevice[device]
 		key := uuid
 		if key == "" {
 			key = partition.Device + "|" + partition.Mountpoint
 		}
+		if _, ok := seenKeys[key]; ok {
+			continue
+		}
+		usage, err := usageForMountpoint(partition.Mountpoint)
+		if err != nil {
+			continue
+		}
+		seenMountpoints[partition.Mountpoint] = struct{}{}
+		seenKeys[key] = struct{}{}
 		inventory = append(inventory, report.Filesystem{
 			Key:            key,
 			UUID:           uuid,

@@ -57,6 +57,7 @@ func NewAPI(database dataStore, adminToken string, logger *slog.Logger, releaseC
 	api.mux.HandleFunc("GET /api/v1/nodes/{nodeID}/history", api.getNodeHistory)
 	api.mux.HandleFunc("POST /api/v1/admin/nodes", api.requireAdmin(api.registerNode))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes", api.requireAdmin(api.listNodes))
+	api.mux.HandleFunc("GET /api/v1/admin/nodes/export", api.requireAdmin(api.exportNodes))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes/{nodeID}", api.requireAdmin(api.getNode))
 	api.mux.HandleFunc("PUT /api/v1/admin/nodes/{nodeID}/primary-network-interface", api.requireAdmin(api.setPrimaryNetworkInterface))
 	api.mux.HandleFunc("PUT /api/v1/admin/nodes/{nodeID}/tags", api.requireAdmin(api.updateNodeTags))
@@ -165,6 +166,43 @@ func (api *API) listNodes(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"nodes": nodes})
+}
+
+func (api *API) exportNodes(response http.ResponseWriter, request *http.Request) {
+	ctx, cancel := contextWithTimeout(request, 30*time.Second)
+	defer cancel()
+	nodes, err := api.store.ListNodes(ctx)
+	if err != nil {
+		api.logger.Error("list nodes for export failed", "error", err)
+		writeError(response, http.StatusInternalServerError, "cannot list nodes for export")
+		return
+	}
+	details := make([]store.NodeDetail, 0, len(nodes))
+	for _, node := range nodes {
+		detail, err := api.store.GetNode(ctx, node.NodeID)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			api.logger.Error("get node for export failed", "node_id", node.NodeID, "error", err)
+			writeError(response, http.StatusInternalServerError, "cannot export node information")
+			return
+		}
+		details = append(details, detail)
+	}
+	workbook, err := buildNodeExportWorkbook(details)
+	if err != nil {
+		api.logger.Error("build node export failed", "error", err)
+		writeError(response, http.StatusInternalServerError, "cannot build Excel export")
+		return
+	}
+	now := time.Now().UTC()
+	response.Header().Set("Content-Type", spreadsheetContentType)
+	response.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="server-status-nodes-%s.xlsx"`, now.Format("20060102-150405")))
+	response.WriteHeader(http.StatusOK)
+	if _, err := response.Write(workbook); err != nil {
+		api.logger.Error("write node export failed", "error", err)
+	}
 }
 
 func (api *API) getNode(response http.ResponseWriter, request *http.Request) {

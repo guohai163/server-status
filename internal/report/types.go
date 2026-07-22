@@ -33,6 +33,7 @@ type AgentInfo struct {
 	Architecture  string            `json:"architecture"`
 	AgentVersion  string            `json:"agent_version"`
 	MachineType   string            `json:"machine_type,omitempty"`
+	SystemModel   string            `json:"system_model,omitempty"`
 	PrimaryIP     string            `json:"primary_ip,omitempty"`
 	Labels        map[string]string `json:"labels,omitempty"`
 }
