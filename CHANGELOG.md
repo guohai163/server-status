@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.14.2 - 2026-07-23
+
+### Fixed
+- Replace deprecated BITSAdmin downloads in Windows install and update commands with a PowerShell WebClient command compatible with both Command Prompt and PowerShell.
+
 ## v0.14.1 - 2026-07-23
 
 ### Fixed

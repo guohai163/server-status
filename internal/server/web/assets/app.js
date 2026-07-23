@@ -736,6 +736,12 @@
     return `'${String(value).replace(/'/g, `'\\''`)}'`;
   }
 
+  function buildWindowsDownloadCommand(downloadURL, filename) {
+    const urlLiteral = `'${String(downloadURL).replace(/'/g, "''")}'`;
+    const filenameLiteral = `'${String(filename).replace(/'/g, "''")}'`;
+    return `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "(New-Object System.Net.WebClient).DownloadFile(${urlLiteral}, [System.IO.Path]::Combine([System.Environment]::CurrentDirectory, ${filenameLiteral}))"`;
+  }
+
   function buildInstallCommand(credentials, environment, version, platform) {
     const origin = location.origin;
     if (platform.startsWith("windows-")) {
@@ -751,7 +757,7 @@
       ];
       if (environment) installArguments.push(`--environment "${environment}"`);
       return [
-        `cmd.exe /d /c bitsadmin /transfer ServerStatusAgent /download /priority normal "${downloadURL}" "%CD%\\server-status-agent.exe"`,
+        buildWindowsDownloadCommand(downloadURL, "server-status-agent.exe"),
         `.\\server-status-agent.exe ${installArguments.join(" ")}`
       ].join("\r\n");
     }
@@ -781,7 +787,7 @@
     const downloadURL = `${location.origin}/agent/releases/latest/${asset}`;
     return [
       `cmd.exe /d /c if exist "%CD%\\${filename}" del /q "%CD%\\${filename}"`,
-      `cmd.exe /d /c bitsadmin /transfer ServerStatusAgentUpgrade /download /priority normal "${downloadURL}" "%CD%\\${filename}"`,
+      buildWindowsDownloadCommand(downloadURL, filename),
       `.\\${filename} upgrade`,
       `cmd.exe /d /c del /q "%CD%\\${filename}"`
     ].join("\r\n");

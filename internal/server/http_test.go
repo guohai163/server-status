@@ -339,6 +339,8 @@ func TestWebUIIncludesWindowsAgentUpgradeCommand(t *testing.T) {
 		"/assets/app.js": {
 			"data-agent-upgrade", "server-status-agent-upgrade.exe", ".\\\\${filename} upgrade",
 			`if exist "%CD%\\${filename}" del /q`,
+			"powershell.exe -NoLogo -NoProfile -NonInteractive", "System.Net.WebClient",
+			"System.Environment]::CurrentDirectory",
 		},
 	} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
@@ -351,6 +353,9 @@ func TestWebUIIncludesWindowsAgentUpgradeCommand(t *testing.T) {
 			if !strings.Contains(response.Body.String(), value) {
 				t.Errorf("GET %s does not contain %q", path, value)
 			}
+		}
+		if path == "/assets/app.js" && strings.Contains(strings.ToLower(response.Body.String()), "bitsadmin") {
+			t.Error("Windows commands must not use deprecated BITSAdmin")
 		}
 	}
 }
