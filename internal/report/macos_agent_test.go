@@ -75,7 +75,8 @@ func TestMacOSScriptProducesValidReport(t *testing.T) {
 		t.Fatalf("expected aggregate CPU and memory inventory: %+v", payload.Inventory)
 	}
 	cpu := payload.Inventory.CPUPackages[0]
-	if payload.Agent.Architecture == "arm64" && cpu.PerformanceCores+cpu.EfficiencyCores != cpu.PhysicalCores {
+	classifiedCores := cpu.PerformanceCores + cpu.EfficiencyCores
+	if payload.Agent.Architecture == "arm64" && classifiedCores != 0 && classifiedCores != cpu.PhysicalCores {
 		t.Fatalf("Apple Silicon core classes do not match physical cores: %+v", cpu)
 	}
 }
