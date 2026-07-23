@@ -338,6 +338,7 @@ func TestWebUIIncludesWindowsAgentUpgradeCommand(t *testing.T) {
 		"/": {"agent-update-dialog", "copy-agent-update-command"},
 		"/assets/app.js": {
 			"data-agent-upgrade", "server-status-agent-upgrade.exe", ".\\\\${filename} upgrade",
+			`if exist "%CD%\\${filename}" del /q`,
 		},
 	} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)

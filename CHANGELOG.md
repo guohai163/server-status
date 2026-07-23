@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.14.1 - 2026-07-23
+
+### Fixed
+- Avoid PowerShell intercepting the Windows Agent update command's temporary-file cleanup redirection.
+
 ## v0.14.0 - 2026-07-23
 
 ### Added

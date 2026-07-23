@@ -780,7 +780,7 @@
     const filename = "server-status-agent-upgrade.exe";
     const downloadURL = `${location.origin}/agent/releases/latest/${asset}`;
     return [
-      `cmd.exe /d /c del /q "%CD%\\${filename}" 2>nul`,
+      `cmd.exe /d /c if exist "%CD%\\${filename}" del /q "%CD%\\${filename}"`,
       `cmd.exe /d /c bitsadmin /transfer ServerStatusAgentUpgrade /download /priority normal "${downloadURL}" "%CD%\\${filename}"`,
       `.\\${filename} upgrade`,
       `cmd.exe /d /c del /q "%CD%\\${filename}"`
