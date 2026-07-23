@@ -23,6 +23,8 @@ func main() {
 		return
 	case "install":
 		err = installCommand(os.Args[2:])
+	case "upgrade":
+		err = upgradeCommand(os.Args[2:])
 	case "remove":
 		flags := flag.NewFlagSet("remove", flag.ContinueOnError)
 		purge := flags.Bool("purge", false, "also delete configuration and logs")
@@ -51,6 +53,23 @@ func main() {
 		fmt.Fprintln(os.Stderr, "server-status-agent:", err)
 		os.Exit(1)
 	}
+}
+
+func upgradeCommand(arguments []string) error {
+	flags := flag.NewFlagSet("upgrade", flag.ContinueOnError)
+	configPath := flags.String("config", defaultConfigPath(), "existing configuration path")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	config, err := loadConfig(*configPath)
+	if err != nil {
+		return fmt.Errorf("load existing configuration: %v", err)
+	}
+	if err := installService(config); err != nil {
+		return err
+	}
+	fmt.Printf("Windows service %s upgraded and started.\n", serviceName)
+	return nil
 }
 
 func installCommand(arguments []string) error {
@@ -107,6 +126,7 @@ func osSignalNotify(signals chan<- os.Signal) {
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  server-status-agent.exe install --server URL --id UUID --token TOKEN [--environment production]")
+	fmt.Fprintln(os.Stderr, "  server-status-agent.exe upgrade [--config PATH]")
 	fmt.Fprintln(os.Stderr, "  server-status-agent.exe start|stop|status")
 	fmt.Fprintln(os.Stderr, "  server-status-agent.exe remove [--purge]")
 	fmt.Fprintln(os.Stderr, "  server-status-agent.exe run [--config PATH]")

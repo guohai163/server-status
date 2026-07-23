@@ -332,6 +332,28 @@ func TestMacOSAgentInstallerIsServedWithoutCaching(t *testing.T) {
 	}
 }
 
+func TestWebUIIncludesWindowsAgentUpgradeCommand(t *testing.T) {
+	api, _ := testAPI()
+	for path, expected := range map[string][]string{
+		"/": {"agent-update-dialog", "copy-agent-update-command"},
+		"/assets/app.js": {
+			"data-agent-upgrade", "server-status-agent-upgrade.exe", ".\\\\${filename} upgrade",
+		},
+	} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+		api.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s returned %d", path, response.Code)
+		}
+		for _, value := range expected {
+			if !strings.Contains(response.Body.String(), value) {
+				t.Errorf("GET %s does not contain %q", path, value)
+			}
+		}
+	}
+}
+
 func TestHistoryRangeValidation(t *testing.T) {
 	api, _ := testAPI()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes/10000000-0000-4000-8000-000000000001/history?range=forever", nil)

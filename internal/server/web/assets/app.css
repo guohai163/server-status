@@ -215,6 +215,7 @@ button { color: inherit; }
 .detail-head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 24px; }
 .back-button { flex: 0 0 auto; width: 36px; height: 36px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); cursor: pointer; font-size: 19px; }
 .detail-title { min-width: 0; flex: 1; }
+.detail-actions { flex: 0 0 auto; display: flex; gap: 8px; }
 .detail-title h1 { margin: 0; overflow-wrap: anywhere; font-size: 22px; line-height: 30px; letter-spacing: 0; }
 .detail-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 5px; color: var(--muted); font-size: 12px; }
 .detail-meta code { color: var(--detail-code); }
@@ -343,7 +344,8 @@ button { color: inherit; }
   .list-filter select { min-width: 0; flex: 1; }
   .node-grid { grid-template-columns: 1fr; }
   .node-card { min-height: 343px; }
-  .detail-head { gap: 10px; }
+  .detail-head { flex-wrap: wrap; gap: 10px; }
+  .detail-actions { width: calc(100% - 46px); margin-left: 46px; }
   .detail-title h1 { font-size: 19px; line-height: 26px; }
   .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .metric-tile, .metric-tile:nth-child(3) { border-right: 1px solid var(--line); border-top: 1px solid var(--line); }

@@ -13,6 +13,10 @@
   const installCommandResult = document.getElementById("install-command-result");
   const installCommand = document.getElementById("install-command");
   const copyInstallCommand = document.getElementById("copy-install-command");
+  const agentUpdateDialog = document.getElementById("agent-update-dialog");
+  const agentUpdateContext = document.getElementById("agent-update-context");
+  const agentUpdateCommand = document.getElementById("agent-update-command");
+  const copyAgentUpdateCommand = document.getElementById("copy-agent-update-command");
   const exportDialog = document.getElementById("export-dialog");
   const exportForm = document.getElementById("export-form");
   const exportAdminToken = document.getElementById("export-admin-token");
@@ -145,6 +149,9 @@
     if (machineType) return machineType === "physical";
     const packages = Number(node.cpu_package_count) || 0;
     return packages > 1 && (Number(node.cpu_logical_thread_count) || 0) > packages;
+  }
+  function isWindowsNode(node) {
+    return String(node.os_name || "").trim().toLowerCase().startsWith("windows");
   }
   function cpuLabel(node) {
     const packageThreads = (node.cpu_threads_per_package || []).map(Number).filter((threads) => threads > 0);
@@ -350,13 +357,16 @@
       ? `<span>${escapeHTML(node.hostname)}</span>` : "";
     const lastReport = node.status === "pending" ? "等待首次上报" : `最近上报 ${formatTime(node.last_seen_at, true)}`;
     const rangeButtons = ranges.map((range) => `<button class="range-button ${range === selectedRange ? "active" : ""}" type="button" data-range="${range}">${range}</button>`).join("");
+    const agentActions = isWindowsNode(node)
+      ? '<div class="detail-actions"><button class="secondary-button" type="button" data-agent-upgrade>更新 Agent</button></div>'
+      : "";
     app.innerHTML = `<div class="detail-head">
       <button class="back-button" type="button" title="返回节点列表" aria-label="返回节点列表">←</button>
       <div class="detail-title"><h1>${escapeHTML(displayName(node))}</h1><div class="detail-meta">
         <span class="status-label"><i class="status-dot ${escapeHTML(node.status)}"></i>${escapeHTML(statusText(node.status))}</span>
         <code>${escapeHTML(node.primary_ip || "未获取 IP")}</code>${alias}
         <span>${lastReport}</span>
-      </div><div class="detail-tags">${tagBadges(node.tags, "detail-tag-list")}<button class="tag-edit-button" type="button" data-edit-tags title="编辑 Tag" aria-label="编辑 Tag">+</button></div></div>
+      </div><div class="detail-tags">${tagBadges(node.tags, "detail-tag-list")}<button class="tag-edit-button" type="button" data-edit-tags title="编辑 Tag" aria-label="编辑 Tag">+</button></div></div>${agentActions}
     </div>
     <div class="metric-strip">
       ${metricTile("CPU", formatPercent(node.cpu_usage_percent), `${node.cpu_physical_core_count} 核 / ${node.cpu_logical_thread_count} 线程`)}
@@ -384,6 +394,8 @@
     <section class="section"><div class="section-head"><div><h2>网络接口</h2><p>地址、链路状态与当前吞吐</p></div></div>${networkTable(detail.network)}</section>`;
     app.querySelector(".back-button").addEventListener("click", () => { location.hash = ""; });
     app.querySelector("[data-edit-tags]").addEventListener("click", () => openTagDialog(node));
+    const agentUpgradeButton = app.querySelector("[data-agent-upgrade]");
+    if (agentUpgradeButton) agentUpgradeButton.addEventListener("click", () => openAgentUpdateDialog(node));
     app.querySelectorAll("[data-range]").forEach((button) => button.addEventListener("click", () => changeRange(node.node_id, button.dataset.range)));
     app.querySelectorAll("[data-primary-interface-id]").forEach((button) => button.addEventListener("click", () => {
       selectPrimaryNetworkInterface(node.node_id, button.dataset.primaryInterfaceId, button.dataset.interfaceName, button);
@@ -763,6 +775,29 @@
     return `curl -fsSL ${shellQuote(`${origin}/install-agent.sh`)} | sudo env ${variables.join(" ")} sh`;
   }
 
+  function buildWindowsUpgradeCommand() {
+    const asset = "server-status-agent-windows-amd64.exe";
+    const filename = "server-status-agent-upgrade.exe";
+    const downloadURL = `${location.origin}/agent/releases/latest/${asset}`;
+    return [
+      `cmd.exe /d /c del /q "%CD%\\${filename}" 2>nul`,
+      `cmd.exe /d /c bitsadmin /transfer ServerStatusAgentUpgrade /download /priority normal "${downloadURL}" "%CD%\\${filename}"`,
+      `.\\${filename} upgrade`,
+      `cmd.exe /d /c del /q "%CD%\\${filename}"`
+    ].join("\r\n");
+  }
+
+  function openAgentUpdateDialog(node) {
+    agentUpdateContext.textContent = `${displayName(node)} · 当前 Agent ${node.agent_version || "--"}`;
+    agentUpdateCommand.textContent = buildWindowsUpgradeCommand();
+    copyAgentUpdateCommand.textContent = "复制命令";
+    agentUpdateDialog.showModal();
+  }
+
+  function closeAgentUpdateDialog() {
+    agentUpdateDialog.close();
+  }
+
   function resetAddNodeDialog() {
     addNodeForm.reset();
     document.getElementById("node-environment").value = "production";
@@ -841,13 +876,12 @@
     }
   }
 
-  async function copyCommand() {
-    const command = installCommand.textContent;
+  async function copyText(text) {
     try {
-      await navigator.clipboard.writeText(command);
+      await navigator.clipboard.writeText(text);
     } catch (_) {
       const textarea = document.createElement("textarea");
-      textarea.value = command;
+      textarea.value = text;
       textarea.style.position = "fixed";
       textarea.style.opacity = "0";
       document.body.appendChild(textarea);
@@ -855,6 +889,10 @@
       document.execCommand("copy");
       textarea.remove();
     }
+  }
+
+  async function copyCommand() {
+    await copyText(installCommand.textContent);
     copyInstallCommand.textContent = "已复制";
   }
 
@@ -965,6 +1003,17 @@
   addNodeDialog.addEventListener("close", resetAddNodeDialog);
   addNodeForm.addEventListener("submit", registerNode);
   copyInstallCommand.addEventListener("click", copyCommand);
+  document.getElementById("close-agent-update-dialog").addEventListener("click", closeAgentUpdateDialog);
+  agentUpdateDialog.querySelector("[data-close-agent-update]").addEventListener("click", closeAgentUpdateDialog);
+  agentUpdateDialog.addEventListener("close", () => {
+    agentUpdateContext.textContent = "";
+    agentUpdateCommand.textContent = "";
+    copyAgentUpdateCommand.textContent = "复制命令";
+  });
+  copyAgentUpdateCommand.addEventListener("click", async () => {
+    await copyText(agentUpdateCommand.textContent);
+    copyAgentUpdateCommand.textContent = "已复制";
+  });
   document.getElementById("close-network-preference-dialog").addEventListener("click", closeNetworkPreferenceDialog);
   networkPreferenceDialog.querySelector("[data-close-network-preference]").addEventListener("click", closeNetworkPreferenceDialog);
   networkPreferenceDialog.addEventListener("close", () => {

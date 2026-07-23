@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.14.0 - 2026-07-23
+
+### Added
+- Add a Windows Agent update command to existing node details and preserve the installed node configuration during upgrades.
+
 ## v0.13.1 - 2026-07-23
 
 ### Fixed

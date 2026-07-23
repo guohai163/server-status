@@ -69,6 +69,14 @@ server-status-agent.exe remove
 server-status-agent.exe remove --purge
 ```
 
+已有 Windows 节点可以在中心看板的节点详情页点击“更新 Agent”，复制并以管理员身份执行生成的命令。命令下载中心缓存的最新 Windows Agent，然后执行：
+
+```bat
+server-status-agent-upgrade.exe upgrade
+```
+
+`upgrade` 从现有 `%ProgramFiles%\ServerStatus\agent.json` 读取 Agent ID、Node Token、标签和采集周期，停止服务、替换 EXE 并重新启动，不会重新注册节点或改写凭据。
+
 配置与日志：
 
 | 内容 | 路径 |
@@ -87,4 +95,4 @@ server-status-agent.exe remove --purge
 server-status-agent.exe run --config "C:\path\agent.json"
 ```
 
-Windows 兼容 Agent 故意不执行 Linux Agent 的自动更新指令。发布前需要在 Windows Server 2008 R2 实机验证，再通过停止服务、重新执行新版安装命令完成更新。
+Windows 兼容 Agent 不执行中心下发的自动更新指令。发布前需要在 Windows Server 2008 R2 实机验证，再通过节点详情页生成的更新命令完成升级。

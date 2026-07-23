@@ -74,6 +74,25 @@
       </div>
     </div>
   </dialog>
+  <dialog id="agent-update-dialog" class="node-dialog" aria-labelledby="agent-update-title">
+    <div class="dialog-head">
+      <div>
+        <h2 id="agent-update-title">更新 Windows Agent</h2>
+        <p id="agent-update-context"></p>
+      </div>
+      <button id="close-agent-update-dialog" class="icon-button" type="button" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <div class="install-result">
+      <div class="install-result-head">
+        <div><strong>更新命令</strong><span>使用现有节点配置</span></div>
+        <button id="copy-agent-update-command" class="secondary-button" type="button">复制命令</button>
+      </div>
+      <pre><code id="agent-update-command"></code></pre>
+      <div class="dialog-actions">
+        <button class="primary-button" type="button" data-close-agent-update>完成</button>
+      </div>
+    </div>
+  </dialog>
   <dialog id="export-dialog" class="preference-dialog" aria-labelledby="export-title">
     <div class="dialog-head">
       <div><h2 id="export-title">导出机器信息</h2></div>
