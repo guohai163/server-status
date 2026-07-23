@@ -1,4 +1,4 @@
-.PHONY: all test build build-agent-linux build-agent-release build-windows-agent-release clean
+.PHONY: all test build build-agent-linux build-agent-release build-windows-agent-release build-macos-agent-release clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 VERSION := $(patsubst v%,%,$(VERSION))
@@ -23,6 +23,9 @@ build-agent-release:
 
 build-windows-agent-release:
 	./scripts/build-release-windows-agent.sh "$(VERSION)" dist/release
+
+build-macos-agent-release:
+	./scripts/build-release-macos-agent.sh "$(VERSION)" dist/release
 
 clean:
 	rm -rf bin dist coverage.out

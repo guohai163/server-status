@@ -25,7 +25,7 @@ curl http://10.12.54.200:8080/readyz
 
 数据库使用专用登录角色 `server_status_app`，该角色只继承 `server_status_writer`，没有超级用户、建库或建角色权限。
 
-升级时使用迁移账号依次执行 `db/migrations/V005__nvidia_gpu_metrics.sql`、`db/migrations/V006__node_tags.sql` 和 `db/migrations/V007__gpu_history_metrics.sql`。中央服务启动时只校验 V007 是否存在，不会使用运行时 writer 账号自动修改 schema。
+升级时使用迁移账号按顺序执行尚未安装的迁移，当前最新为 `db/migrations/V008__arm_cpu_core_topology.sql`。中央服务启动时只校验 V008 是否存在，不会使用运行时 writer 账号自动修改 schema。
 
 ## 节点 Agent
 
@@ -86,11 +86,11 @@ SERVER_STATUS_CENTRAL_ENV_FILE=/secure/central.env scripts/deploy-central.sh
 
 新节点默认使用中心看板生成的安装命令。留空 Agent 版本时安装最新稳定 Release；填写语义版本时固定下载对应 Release。重复执行同一条命令会原子替换二进制、刷新配置与守护记录并验证首条上报。
 
-正式发布的中心镜像会保存构建它的 Release 版本，并内置同版本的 Linux `amd64/arm64`、Windows `amd64` Agent 及统一校验文件。`latest` 和镜像固定版本直接从只读内置目录提供，不依赖 GitHub 或运行时缓存；历史版本仍使用持久 Release 缓存。Agent 每次成功上报后，中心比较上报的 `agent_version`；仅当 Agent 版本更低时，响应才携带固定目标版本。支持自更新的 Agent 随后执行：
+正式发布的中心镜像会保存构建它的 Release 版本，并内置同版本的 Linux `amd64/arm64`、Windows `amd64`、macOS Agent 及统一校验文件。`latest` 和镜像固定版本直接从只读内置目录提供，不依赖 GitHub 或运行时缓存；历史版本仍使用持久 Release 缓存。Agent 每次成功上报后，中心比较上报的 `agent_version`；仅当 Agent 版本更低时，响应才携带固定目标版本。支持自更新的 Linux 和 macOS Agent 随后执行：
 
 1. 从中心 Release 缓存下载本机架构的固定版本二进制和 `checksums.txt`。
-2. 校验 SHA-256，并运行临时二进制的 `--version` 确认版本。
-3. 在原安装目录原子替换 Agent 二进制并立即重新执行。
+2. 校验 SHA-256 和临时 Agent 的 `--version`；macOS 还会执行 `zsh` 语法检查。
+3. 在原安装目录原子替换 Agent。Linux 立即重新执行，macOS 正常退出并由 `launchd` 拉起新脚本。
 
 自更新不会调用注册接口，也不会读写 `agent.env`，因此 Agent ID、Node Token、标签与采集配置保持不变；版本相同或更高时不会更新或降级。开发构建的中心版本为 `dev`，不会下发自动更新。
 
@@ -110,7 +110,9 @@ SERVER_STATUS_CENTRAL_ENV_FILE=/secure/central.env scripts/deploy-central.sh
 
 - `server-status-agent-linux-amd64`：Ubuntu/CentOS/RHEL x86_64 静态二进制。
 - `server-status-agent-linux-arm64`：Ubuntu/CentOS/RHEL arm64 静态二进制。
-- `checksums.txt`：两个二进制的 SHA-256 校验值。
+- `server-status-agent-windows-amd64.exe`：Windows Server 2008 R2 及以上兼容 Agent。
+- `server-status-agent-macos`：macOS 11 及以上通用 `zsh` Agent。
+- `checksums.txt`：所有 Agent 产物的 SHA-256 校验值。
 
 中心服务镜像发布到 `ghcr.io/guohai163/server-status-central`，支持 `linux/amd64` 和 `linux/arm64`。正式版本可用完整版本号拉取，`latest` 始终指向最后一次稳定 tag 构建。
 

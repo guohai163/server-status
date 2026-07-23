@@ -317,6 +317,7 @@ func validReleaseAsset(asset string) bool {
 	switch asset {
 	case "checksums.txt",
 		"server-status-agent-linux-amd64", "server-status-agent-linux-arm64",
+		"server-status-agent-macos",
 		"server-status-agent-windows-386.exe", "server-status-agent-windows-amd64.exe":
 		return true
 	default:
@@ -325,7 +326,7 @@ func validReleaseAsset(asset string) bool {
 }
 
 func parseReleaseChecksums(content []byte) (map[string]string, error) {
-	checksums := make(map[string]string, 4)
+	checksums := make(map[string]string, 5)
 	scanner := bufio.NewScanner(strings.NewReader(string(content)))
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())

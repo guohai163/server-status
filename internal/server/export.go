@@ -89,11 +89,11 @@ func (export nodeExportWorkbook) writeSummary(nodes []store.NodeDetail) error {
 
 func (export nodeExportWorkbook) writeCPU(nodes []store.NodeDetail) error {
 	const sheet = "CPU"
-	headers := []string{"显示名称", "主机名", "IP 地址", "封装序号", "厂商", "型号", "物理核心", "逻辑线程", "最高频率 (MHz)"}
+	headers := []string{"显示名称", "主机名", "IP 地址", "封装序号", "厂商", "型号", "物理核心", "性能核", "能效核", "逻辑线程", "最高频率 (MHz)"}
 	rows := make([][]any, 0)
 	for _, detail := range nodes {
 		for _, cpu := range detail.CPUPackages {
-			rows = append(rows, []any{excelText(nodeDisplayName(detail.Node)), excelText(detail.Node.Hostname), excelText(detail.Node.PrimaryIP), cpu.PackageIndex, excelText(cpu.Vendor), excelText(cpu.ModelName), cpu.PhysicalCores, cpu.LogicalThreads, cpu.MaxFrequencyMHz})
+			rows = append(rows, []any{excelText(nodeDisplayName(detail.Node)), excelText(detail.Node.Hostname), excelText(detail.Node.PrimaryIP), cpu.PackageIndex, excelText(cpu.Vendor), excelText(cpu.ModelName), cpu.PhysicalCores, cpu.PerformanceCores, cpu.EfficiencyCores, cpu.LogicalThreads, cpu.MaxFrequencyMHz})
 		}
 	}
 	return export.writeSheet(sheet, headers, rows, 20, map[int]float64{1: 18, 2: 18, 3: 16, 6: 44})

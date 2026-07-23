@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.13.0 - 2026-07-23
+
+### Added
+- Add a zero-dependency macOS 11+ `zsh` Agent with report v1 inventory fingerprints, CPU, memory, filesystem, and network collection.
+- Install the macOS Agent as a root `LaunchDaemon` from the dashboard without an app bundle, code signing, or notarization.
+- Publish and bundle the architecture-independent macOS Agent with the existing verified Release assets.
+- Distinguish Apple Silicon Performance and Efficiency core counts in inventory, database queries, dashboard details, and Excel exports.
+- Apply verified macOS script updates atomically from the central Release cache and restart through `launchd`.
+
 ## v0.12.0 - 2026-07-22
 
 ### Added

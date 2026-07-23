@@ -1,12 +1,14 @@
 # Server Status
 
-Server Status 是一个面向 Linux 服务器的轻量监控系统，由节点 Agent、中心 API 和 PostgreSQL 三部分组成。
+Server Status 是一个面向 Linux、Windows Server 和 macOS 的轻量监控系统，由节点 Agent、中心 API 和 PostgreSQL 三部分组成。
 
 - `server-status-agent`：运行在 Ubuntu/CentOS，默认每分钟采集一次服务器状态。
 - `server-status-server`：以 Docker 容器运行，负责鉴权、校验、事务入库、查询、定时汇总和 Web 数据展示。
 - PostgreSQL：保存节点身份、硬件变更历史、分钟原始指标、最新状态和小时汇总。
 
 另提供独立的 Windows Server 2008 R2 及以上兼容 Agent。它使用 Go 1.20.14、Win32 API 和官方 Windows Service 包实现，以 Windows 服务运行，不与 Linux Agent 共享采集或更新代码。安装与兼容边界见 [docs/windows-agent.md](docs/windows-agent.md)。
+
+macOS 11 及以上使用独立的零依赖 `zsh` Agent，通过系统自带命令采集并由 `launchd` 守护。它不是 `.app` 或原生二进制，因此不需要 Developer ID 签名和 Apple 公证。安装、采集范围和兼容边界见 [docs/macos-agent.md](docs/macos-agent.md)。
 
 当前默认部署目标：
 
@@ -99,6 +101,7 @@ make build-agent-linux
 make build-agent-release VERSION=0.3.2
 # 需要 Go 1.20.14
 make build-windows-agent-release VERSION=0.3.2
+make build-macos-agent-release VERSION=0.3.2
 ```
 
 产物：
@@ -109,6 +112,7 @@ make build-windows-agent-release VERSION=0.3.2
 - `dist/release/server-status-agent-linux-{amd64,arm64}`：带版本信息的发布二进制。
 - `dist/release/checksums.txt`：发布二进制的 SHA-256 校验值。
 - `dist/release/server-status-agent-windows-amd64.exe`：Windows Server 2008 R2 及以上 Agent。
+- `dist/release/server-status-agent-macos`：macOS 11 及以上通用 `zsh` Agent。
 
 Agent 版本由构建时注入，可以直接检查：
 
@@ -121,7 +125,7 @@ server-status-agent --version
 推送符合 `v*.*.*` 的 tag 后，[Release 工作流](.github/workflows/release.yml) 自动完成：
 
 1. 运行 `go test ./...` 和 `go vet ./...`。
-2. 构建 `linux/amd64` 与 `linux/arm64` 的完全静态 Agent，并附加到同名 GitHub Release。
+2. 构建 Linux、Windows 与 macOS Agent，并附加到同名 GitHub Release。
 3. 生成 `checksums.txt`，用于节点安装前校验文件完整性。
 4. 构建 `linux/amd64`、`linux/arm64` 中心镜像，发布到 `ghcr.io/guohai163/server-status-central`。
 5. 为镜像生成 `版本号`、`主版本.次版本` 和 `latest` 标签，并发布 SBOM 与构建来源证明。
@@ -149,6 +153,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V004__primary_network_interface.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V005__nvidia_gpu_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V006__node_tags.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V007__gpu_history_metrics.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V008__arm_cpu_core_topology.sql
 ```
 
 中央服务应使用继承 `server_status_writer` 的独立登录角色，不要使用 PostgreSQL 超级用户。
@@ -203,7 +208,7 @@ curl -fsSL 'https://中心节点/install-agent.sh' | sudo env \
   sh
 ```
 
-安装器从中心节点的 Release 接口下载匹配架构的静态二进制和 `checksums.txt`，目标节点不需要访问 GitHub。正式发布的中心镜像直接内置同版本的 Linux `amd64/arm64` 和 Windows `amd64` Agent；`latest` 与镜像固定版本优先读取并校验这些只读资产，不依赖 GitHub 或可写缓存。只有请求历史版本时，中心才从 `guohai163/server-status` 的 GitHub Release 下载、校验并写入持久缓存。Agent 仍会在安装前再次校验 SHA-256，然后原子安装。响应头 `X-Server-Status-Cache` 会分别标记 `BUNDLED`、`HIT` 或 `MISS`。默认路径：
+安装器从中心节点的 Release 接口下载匹配架构的静态二进制和 `checksums.txt`，目标节点不需要访问 GitHub。正式发布的中心镜像直接内置同版本的 Linux `amd64/arm64`、Windows `amd64` 和 macOS Agent；`latest` 与镜像固定版本优先读取并校验这些只读资产，不依赖 GitHub 或可写缓存。只有请求历史版本时，中心才从 `guohai163/server-status` 的 GitHub Release 下载、校验并写入持久缓存。Agent 仍会在安装前再次校验 SHA-256，然后原子安装。响应头 `X-Server-Status-Cache` 会分别标记 `BUNDLED`、`HIT` 或 `MISS`。默认路径：
 
 | 内容 | 路径 |
 | --- | --- |
@@ -218,6 +223,8 @@ curl -fsSL 'https://中心节点/install-agent.sh' | sudo env \
 
 原有 `scripts/deploy-agent.sh` 继续作为兼容的远程部署方式。只有该旧流程需要开发机安装 Go 1.25、`make`、`python3`、`ssh` 和 `scp`，并配置到中心机和 Agent 节点的免交互 SSH。
 
+macOS 节点在“添加节点”中选择 `macOS 11 及以上`。生成的命令会调用 `/install-agent-macos.sh`，校验通用脚本资产后安装为系统 `LaunchDaemon`。Apple Silicon 节点会分别记录 Performance/Efficiency 核心数；低版本脚本收到中心升级指令后会下载、校验并原子替换自身。详细路径和运维命令见 [macOS Agent 文档](docs/macos-agent.md)。
+
 ## API
 
 | 方法 | 路径 | 鉴权 | 用途 |
@@ -226,6 +233,7 @@ curl -fsSL 'https://中心节点/install-agent.sh' | sudo env \
 | `GET` | `/readyz` | 无 | 检查数据库和迁移就绪 |
 | `GET` | `/` | 无 | Web 节点状态看板 |
 | `GET` | `/install-agent.sh` | 无 | 获取无凭据的 Agent 安装器 |
+| `GET` | `/install-agent-macos.sh` | 无 | 获取无凭据的 macOS Agent 安装器 |
 | `GET` | `/agent/releases/{version}/{asset}` | 无 | 获取中心校验并缓存的 Agent Release 资产 |
 | `GET` | `/api/v1/nodes` | 无 | 查询所有节点最新卡片数据 |
 | `GET` | `/api/v1/nodes/{node_id}` | 无 | 查询节点完整硬件与运行状态 |

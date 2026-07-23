@@ -303,6 +303,34 @@ func TestAgentInstallerIsServedWithoutCaching(t *testing.T) {
 	}
 }
 
+func TestMacOSAgentInstallerIsServedWithoutCaching(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/install-agent-macos.sh", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected macOS installer to return 200, got %d", response.Code)
+	}
+	if contentType := response.Header().Get("Content-Type"); contentType != "text/x-shellscript; charset=utf-8" {
+		t.Fatalf("unexpected installer content type: %s", contentType)
+	}
+	if cacheControl := response.Header().Get("Cache-Control"); cacheControl != "no-store" {
+		t.Fatalf("unexpected installer cache policy: %s", cacheControl)
+	}
+	for _, expected := range []string{
+		"Darwin", "/agent/releases/latest", "/agent/releases/v$version",
+		"server-status-agent-macos", "shasum -a 256", "LaunchDaemons",
+		"launchctl bootstrap system", "/Library/Application Support/ServerStatus",
+	} {
+		if !bytes.Contains(response.Body.Bytes(), []byte(expected)) {
+			t.Fatalf("macOS installer response does not contain %q", expected)
+		}
+	}
+	if bytes.Contains(response.Body.Bytes(), []byte("github.com")) {
+		t.Fatal("macOS installer must not require target nodes to access GitHub")
+	}
+}
+
 func TestHistoryRangeValidation(t *testing.T) {
 	api, _ := testAPI()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes/10000000-0000-4000-8000-000000000001/history?range=forever", nil)

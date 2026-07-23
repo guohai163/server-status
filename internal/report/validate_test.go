@@ -65,6 +65,23 @@ func TestReportValidation(t *testing.T) {
 	}
 }
 
+func TestReportValidationAcceptsHeterogeneousCPUCoreTopology(t *testing.T) {
+	now := time.Now().UTC()
+	payload := validTestReport(t, now)
+	payload.Inventory.CPUPackages[0].PerformanceCores = 3
+	payload.Inventory.CPUPackages[0].EfficiencyCores = 1
+	payload.InventoryFingerprint, _ = InventoryFingerprint(payload.Inventory)
+	if err := payload.Validate(now); err != nil {
+		t.Fatalf("valid heterogeneous CPU topology rejected: %v", err)
+	}
+
+	payload.Inventory.CPUPackages[0].EfficiencyCores = 2
+	payload.InventoryFingerprint, _ = InventoryFingerprint(payload.Inventory)
+	if err := payload.Validate(now); err == nil {
+		t.Fatal("CPU topology that exceeds physical core count was accepted")
+	}
+}
+
 func TestReportValidationRejectsUnknownResource(t *testing.T) {
 	now := time.Now().UTC()
 	payload := validTestReport(t, now)

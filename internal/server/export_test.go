@@ -20,7 +20,7 @@ func TestBuildNodeExportWorkbook(t *testing.T) {
 			MemoryTotalBytes: 32 << 30, MemoryModuleCount: 2, DiskTotalBytes: 2 << 40, DiskCount: 2, CPUUsagePercent: 25.5, MemoryUsagePercent: 50.5,
 			DiskUsagePercent: 42.5, Load1: 1.2, Load5: 1.1, Load15: 1.0, UptimeSeconds: 3600, NetworkRXBytesPerSec: 12, NetworkTXBytesPerSec: 34,
 		},
-		CPUPackages:   []store.CPUHardware{{PackageIndex: 0, Vendor: "Intel", ModelName: "Xeon Gold", PhysicalCores: 8, LogicalThreads: 16, MaxFrequencyMHz: 3200}},
+		CPUPackages:   []store.CPUHardware{{PackageIndex: 0, Vendor: "Apple", ModelName: "M4 Pro", PhysicalCores: 8, LogicalThreads: 8, PerformanceCores: 6, EfficiencyCores: 2, MaxFrequencyMHz: 3200}},
 		MemoryModules: []store.MemoryHardware{{SlotName: "DIMM A1", Manufacturer: "Samsung", ModelName: "M393", SizeBytes: 16 << 30, SpeedMTs: 3200}},
 		BlockDevices:  []store.BlockDeviceHardware{{DeviceName: "/dev/sda", DeviceKind: "disk", ModelName: "PM9A3", SizeBytes: 1 << 40, Rotational: &rotational}},
 		Filesystems:   []store.FilesystemStatus{{DeviceName: "/dev/sda1", FilesystemType: "ext4", MountPoint: "/", BucketAt: &reportedAt, TotalBytes: 1000, UsedBytes: 400, AvailableBytes: 600, UsedPercent: 40}},
@@ -55,6 +55,12 @@ func TestBuildNodeExportWorkbook(t *testing.T) {
 	}
 	if got, err := workbook.GetCellValue("磁盘", "G2"); err != nil || got != "PM9A3" {
 		t.Fatalf("disk model = %q, err=%v", got, err)
+	}
+	if got, err := workbook.GetCellValue("CPU", "H2"); err != nil || got != "6" {
+		t.Fatalf("performance core count = %q, err=%v", got, err)
+	}
+	if got, err := workbook.GetCellValue("CPU", "I2"); err != nil || got != "2" {
+		t.Fatalf("efficiency core count = %q, err=%v", got, err)
 	}
 }
 

@@ -73,7 +73,10 @@ func validateInventory(inventory Inventory) error {
 		return err
 	}
 	for _, item := range inventory.CPUPackages {
-		if strings.TrimSpace(item.ModelName) == "" || item.PhysicalCores < 1 || item.LogicalThreads < item.PhysicalCores || item.PackageIndex < 0 || item.MaxFrequencyMHz < 0 {
+		classifiedCores := item.PerformanceCores + item.EfficiencyCores
+		if strings.TrimSpace(item.ModelName) == "" || item.PhysicalCores < 1 || item.LogicalThreads < item.PhysicalCores || item.PackageIndex < 0 ||
+			item.PerformanceCores < 0 || item.EfficiencyCores < 0 || item.MaxFrequencyMHz < 0 ||
+			classifiedCores != 0 && classifiedCores != item.PhysicalCores {
 			return fmt.Errorf("invalid CPU package %q", item.Key)
 		}
 	}

@@ -29,6 +29,16 @@ func (api *API) registerWebRoutes() {
 		response.Header().Set("Cache-Control", "no-store")
 		_, _ = response.Write(content)
 	})
+	api.mux.HandleFunc("GET /install-agent-macos.sh", func(response http.ResponseWriter, _ *http.Request) {
+		content, err := fs.ReadFile(root, "install-agent-macos.sh")
+		if err != nil {
+			http.Error(response, "macOS Agent installer is unavailable", http.StatusInternalServerError)
+			return
+		}
+		response.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
+		response.Header().Set("Cache-Control", "no-store")
+		_, _ = response.Write(content)
+	})
 	api.mux.HandleFunc("GET /", func(response http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/" {
 			http.NotFound(response, request)

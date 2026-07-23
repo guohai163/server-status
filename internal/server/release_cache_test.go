@@ -94,8 +94,10 @@ func TestReleaseCachePrefersBundledAssetsWithoutUpstream(t *testing.T) {
 	amd64 := []byte("bundled-linux-amd64-agent")
 	arm64 := []byte("bundled-linux-arm64-agent")
 	windowsAMD64 := []byte("bundled-windows-amd64-agent")
+	macos := []byte("bundled-macos-agent")
 	checksums := append(releaseChecksums(amd64, arm64), []byte(fmt.Sprintf(
-		"%x  server-status-agent-windows-amd64.exe\n", sha256.Sum256(windowsAMD64)))...)
+		"%x  server-status-agent-windows-amd64.exe\n%x  server-status-agent-macos\n",
+		sha256.Sum256(windowsAMD64), sha256.Sum256(macos)))...)
 	bundledRoot := t.TempDir()
 	releaseDirectory := filepath.Join(bundledRoot, "v1.2.3")
 	if err := os.MkdirAll(releaseDirectory, 0o755); err != nil {
@@ -105,6 +107,7 @@ func TestReleaseCachePrefersBundledAssetsWithoutUpstream(t *testing.T) {
 		"checksums.txt":                         checksums,
 		"server-status-agent-linux-amd64":       amd64,
 		"server-status-agent-linux-arm64":       arm64,
+		"server-status-agent-macos":             macos,
 		"server-status-agent-windows-amd64.exe": windowsAMD64,
 	} {
 		if err := os.WriteFile(filepath.Join(releaseDirectory, name), content, 0o644); err != nil {
@@ -127,6 +130,7 @@ func TestReleaseCachePrefersBundledAssetsWithoutUpstream(t *testing.T) {
 		for asset, content := range map[string][]byte{
 			"checksums.txt":                         checksums,
 			"server-status-agent-linux-amd64":       amd64,
+			"server-status-agent-macos":             macos,
 			"server-status-agent-windows-amd64.exe": windowsAMD64,
 		} {
 			response := performRequest(api, "/agent/releases/"+version+"/"+asset)
@@ -248,6 +252,30 @@ func TestReleaseCacheServesWindowsAgent(t *testing.T) {
 	response := performRequest(api, "/agent/releases/v1.2.3/server-status-agent-windows-386.exe")
 	if response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), windows) {
 		t.Fatalf("unexpected Windows asset response: status=%d body=%q", response.Code, response.Body.Bytes())
+	}
+}
+
+func TestReleaseCacheServesMacOSAgent(t *testing.T) {
+	amd64 := []byte("linux-amd64-agent")
+	arm64 := []byte("linux-arm64-agent")
+	macos := []byte("#!/bin/zsh\nprint macos-agent\n")
+	checksums := append(releaseChecksums(amd64, arm64), []byte(fmt.Sprintf(
+		"%x  server-status-agent-macos\n", sha256.Sum256(macos)))...)
+	cache := testReleaseCache(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/releases/download/v1.2.3/checksums.txt":
+			_, _ = response.Write(checksums)
+		case "/releases/download/v1.2.3/server-status-agent-macos":
+			_, _ = response.Write(macos)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	api, _ := testAPI()
+	api.releases = cache
+	response := performRequest(api, "/agent/releases/v1.2.3/server-status-agent-macos")
+	if response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), macos) {
+		t.Fatalf("unexpected macOS asset response: status=%d body=%q", response.Code, response.Body.Bytes())
 	}
 }
 

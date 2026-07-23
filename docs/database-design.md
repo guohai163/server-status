@@ -55,7 +55,7 @@ erDiagram
 
 | 表 | 主要内容 |
 | --- | --- |
-| `cpu_packages` | CPU 封装、型号、物理核心数、逻辑线程数和最大频率 |
+| `cpu_packages` | CPU 封装、型号、物理核心数、性能核/能效核、逻辑线程数和最大频率 |
 | `memory_modules` | 插槽、厂商、型号/料号、序列号、容量和速率 |
 | `block_devices` | 物理盘、RAID、multipath 或虚拟块设备的型号与容量 |
 | `filesystems` | 文件系统稳定标识、设备名、类型和挂载点 |
@@ -133,7 +133,7 @@ SELECT monitoring.rollup_hour($1::timestamptz);
 
 ## 部署与验证
 
-迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好，`V005` 增加 NVIDIA GPU 清单和当前指标，`V006` 增加每节点最多 5 个管理员 Tag，`V007` 增加逐 GPU 分钟历史、小时汇总与 current 同步触发器。在连接信息由环境或 `.pgpass` 提供的前提下执行：
+迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好，`V005` 增加 NVIDIA GPU 清单和当前指标，`V006` 增加每节点最多 5 个管理员 Tag，`V007` 增加逐 GPU 分钟历史、小时汇总与 current 同步触发器，`V008` 增加 ARM 性能核与能效核拓扑。在连接信息由环境或 `.pgpass` 提供的前提下执行：
 
 ```bash
 psql -v ON_ERROR_STOP=1 -f db/migrations/V001__monitoring_schema.sql
@@ -143,6 +143,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V004__primary_network_interface.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V005__nvidia_gpu_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V006__node_tags.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V007__gpu_history_metrics.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V008__arm_cpu_core_topology.sql
 psql -v ON_ERROR_STOP=1 -f db/verify/V001__verify.sql
 ```
 

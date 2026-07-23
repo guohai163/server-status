@@ -86,13 +86,19 @@ CREATE TABLE cpu_packages (
     model_name text NOT NULL,
     physical_cores integer NOT NULL CHECK (physical_cores > 0),
     logical_threads integer NOT NULL CHECK (logical_threads >= physical_cores),
+    performance_cores integer NOT NULL DEFAULT 0 CHECK (performance_cores >= 0),
+    efficiency_cores integer NOT NULL DEFAULT 0 CHECK (efficiency_cores >= 0),
     max_frequency_mhz numeric(10, 2) CHECK (max_frequency_mhz IS NULL OR max_frequency_mhz >= 0),
     first_seen_at timestamptz NOT NULL,
     last_seen_at timestamptz NOT NULL,
     removed_at timestamptz,
     UNIQUE (node_id, id),
     CHECK (last_seen_at >= first_seen_at),
-    CHECK (removed_at IS NULL OR removed_at >= first_seen_at)
+    CHECK (removed_at IS NULL OR removed_at >= first_seen_at),
+    CHECK (
+        performance_cores + efficiency_cores = 0 OR
+        performance_cores + efficiency_cores = physical_cores
+    )
 );
 
 CREATE UNIQUE INDEX cpu_packages_active_key_uq

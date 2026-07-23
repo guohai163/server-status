@@ -548,7 +548,12 @@
     return `<div class="table-wrap"><table class="data-table"><thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
   }
   function cpuTable(items) {
-    return table(["型号", "核心 / 线程", "最高频率"], (items || []).map((item) => `<tr><td>${escapeHTML([item.vendor, item.model_name].filter(Boolean).join(" "))}</td><td>${item.physical_cores} / ${item.logical_threads}</td><td>${item.max_frequency_mhz ? `${item.max_frequency_mhz.toFixed(0)} MHz` : "--"}</td></tr>`));
+    return table(["型号", "核心拓扑", "最高频率"], (items || []).map((item) => {
+      const classes = item.performance_cores || item.efficiency_cores
+        ? ` · ${item.performance_cores || 0}P + ${item.efficiency_cores || 0}E`
+        : "";
+      return `<tr><td>${escapeHTML([item.vendor, item.model_name].filter(Boolean).join(" "))}</td><td>${item.physical_cores} 核 / ${item.logical_threads} 线程${classes}</td><td>${item.max_frequency_mhz ? `${item.max_frequency_mhz.toFixed(0)} MHz` : "--"}</td></tr>`;
+    }));
   }
   function memoryTable(items) {
     return table(["插槽", "型号", "容量", "类型 / 速率"], (items || []).map((item) => `<tr><td>${escapeHTML(item.slot_name || "--")}</td><td>${escapeHTML(item.model_name || item.part_number || item.manufacturer || "--")}</td><td>${formatBytes(item.size_bytes)}</td><td>${escapeHTML(item.memory_type || "--")}${item.speed_mts ? ` / ${item.speed_mts} MT/s` : ""}</td></tr>`));
@@ -738,6 +743,16 @@
         `.\\server-status-agent.exe ${installArguments.join(" ")}`
       ].join("\r\n");
     }
+    if (platform === "macos") {
+      const variables = [
+        `SERVER_STATUS_URL=${shellQuote(origin)}`,
+        `SERVER_STATUS_AGENT_ID=${shellQuote(credentials.agent_id)}`,
+        `SERVER_STATUS_TOKEN=${shellQuote(credentials.token)}`
+      ];
+      if (environment) variables.push(`SERVER_STATUS_AGENT_ENVIRONMENT=${shellQuote(environment)}`);
+      if (version) variables.push(`SERVER_STATUS_AGENT_VERSION=${shellQuote(version)}`);
+      return `curl -fsSL ${shellQuote(`${origin}/install-agent-macos.sh`)} | sudo env ${variables.join(" ")} sh`;
+    }
     const variables = [
       `SERVER_STATUS_URL=${shellQuote(origin)}`,
       `SERVER_STATUS_AGENT_ID=${shellQuote(credentials.agent_id)}`,
@@ -785,6 +800,10 @@
       payload.os_name = "Windows";
       payload.architecture = platform === "windows-386" ? "386" : "amd64";
       payload.agent_version = "windows-legacy-pending";
+    } else if (platform === "macos") {
+      payload.os_name = "macOS";
+      payload.architecture = "universal";
+      payload.agent_version = "macos-script-pending";
     }
 
     addNodeError.hidden = true;

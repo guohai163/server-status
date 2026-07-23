@@ -28,16 +28,28 @@ RUN version="${VERSION#v}"; mkdir -p /out/agent-release; \
       ./scripts/build-release-windows-agent.sh "$version" /out/agent-release; \
     fi
 
+FROM alpine:3.22 AS build-macos-agent
+WORKDIR /src
+COPY macos-agent ./macos-agent
+COPY scripts/build-release-macos-agent.sh scripts/write-release-checksums.sh ./scripts/
+ARG VERSION
+RUN version="${VERSION#v}"; mkdir -p /out/agent-release; \
+    if printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then \
+      ./scripts/build-release-macos-agent.sh "$version" /out/agent-release; \
+    fi
+
 FROM alpine:3.22 AS bundle-agent
 ARG VERSION
 COPY scripts/write-release-checksums.sh /usr/local/bin/write-release-checksums
 COPY --from=build /out/agent-release /tmp/linux
 COPY --from=build-windows-agent /out/agent-release /tmp/windows
+COPY --from=build-macos-agent /out/agent-release /tmp/macos
 RUN version="${VERSION#v}"; mkdir -p /out; \
     if printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then \
       release="/out/v$version"; mkdir -p "$release"; \
       cp /tmp/linux/server-status-agent-* "$release/"; \
       cp /tmp/windows/server-status-agent-* "$release/"; \
+      cp /tmp/macos/server-status-agent-* "$release/"; \
       /usr/local/bin/write-release-checksums "$release"; \
       ln -s "v$version" /out/latest; \
     fi

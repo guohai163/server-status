@@ -1,0 +1,968 @@
+#!/bin/zsh
+
+emulate -LR zsh
+setopt NO_UNSET PIPE_FAIL
+
+AGENT_VERSION='dev'
+readonly AGENT_VERSION
+AGENT_PATH=${0:A}
+readonly AGENT_PATH
+readonly DEFAULT_CONFIG='/Library/Application Support/ServerStatus/agent.env'
+readonly DEFAULT_LOCK='/var/run/server-status-agent-macos.lock'
+export PATH='/usr/bin:/bin:/usr/sbin:/sbin'
+export LC_ALL=C
+
+typeset -g REPORT_PAYLOAD=''
+typeset -g SEND_RETRYABLE=false
+typeset -g REQUESTED_UPDATE_VERSION=''
+typeset -g ACTIVE_LOCK_PATH=''
+typeset -gA PREVIOUS_RX_BYTES PREVIOUS_TX_BYTES PREVIOUS_RX_PACKETS PREVIOUS_TX_PACKETS
+
+log_message() {
+  local level=$1
+  shift
+  print -r -- "$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ') level=$level $*"
+}
+
+fail() {
+  log_message error "$*" >&2
+  return 1
+}
+
+sysctl_value() {
+  /usr/sbin/sysctl -n "$1" 2>/dev/null || true
+}
+
+clean_field() {
+  local value=${1:-}
+  value=${value//$'\t'/ }
+  value=${value//$'\r'/ }
+  value=${value//$'\n'/ }
+  REPLY=${value//  / }
+}
+
+write_row() {
+  local destination=$1
+  shift
+  local value row=''
+  for value in "$@"; do
+    clean_field "$value"
+    if [[ -n $row ]]; then
+      row+=$'\t'
+    fi
+    row+=$REPLY
+  done
+  print -r -- "$row" >> "$destination"
+}
+
+nonnegative_integer() {
+  local value=${1:-0}
+  if [[ $value == <-> ]]; then
+    REPLY=$value
+  else
+    REPLY=0
+  fi
+}
+
+clamp_percentage() {
+  local value=${1:-0}
+  REPLY=$(/usr/bin/awk -v value="$value" 'BEGIN {
+    if (value !~ /^[0-9]+([.][0-9]+)?$/) value = 0
+    if (value < 0) value = 0
+    if (value > 100) value = 100
+    printf "%.2f", value
+  }')
+}
+
+ipv4_prefix_length() {
+  local hexadecimal=${1#0x}
+  if [[ ! $hexadecimal =~ '^[0-9a-fA-F]+$' ]]; then
+    REPLY=0
+    return
+  fi
+  local -i mask=$(( 16#$hexadecimal ))
+  local -i prefix=0 bit
+  for bit in {0..31}; do
+    if (( mask & (1 << bit) )); then
+      (( prefix++ ))
+    fi
+  done
+  REPLY=$prefix
+}
+
+address_scope() {
+  local address=${1:l}
+  if [[ $address == *:* ]]; then
+    case $address in
+      '::1') REPLY=host ;;
+      fe80:*|fe[89ab]:*) REPLY=link ;;
+      fc*:*|fd*:*) REPLY=private ;;
+      ff*:*) REPLY=multicast ;;
+      *) REPLY=global ;;
+    esac
+    return
+  fi
+  case $address in
+    127.*) REPLY=host ;;
+    169.254.*) REPLY=link ;;
+    10.*|192.168.*|172.<16-31>.*) REPLY=private ;;
+    <224-239>.*) REPLY=multicast ;;
+    *) REPLY=global ;;
+  esac
+}
+
+read_cpu_usage() {
+  local output idle logical sum
+  output=$(/usr/bin/top -l 2 -n 0 -stats cpu -s 1 2>/dev/null || true)
+  idle=$(print -r -- "$output" | /usr/bin/awk '
+    /CPU usage:/ {
+      for (i = 1; i <= NF; i++) {
+        if ($i == "idle") {
+          value = $(i - 1)
+          gsub(/[% ,]/, "", value)
+        }
+      }
+    }
+    END { print value }
+  ')
+  if [[ $idle == <->(|.<->) ]]; then
+    clamp_percentage "$(( 100.0 - idle ))"
+    return
+  fi
+
+  logical=$(sysctl_value hw.logicalcpu)
+  nonnegative_integer "$logical"
+  logical=$REPLY
+  (( logical > 0 )) || logical=1
+  sum=$(/bin/ps -A -o %cpu= 2>/dev/null | /usr/bin/awk '{ total += $1 } END { printf "%.2f", total }' || true)
+  clamp_percentage "$(( ${sum:-0} / logical ))"
+}
+
+read_memory_metrics() {
+  local metadata_file=$1
+  local total page_size vm_output free inactive speculative file_backed available used cached
+  local swap_line swap_total swap_used uptime boot_time now hardware_json physical_memory
+
+  total=$(sysctl_value hw.memsize)
+  nonnegative_integer "$total"
+  total=$REPLY
+  if (( total == 0 )); then
+    hardware_json=$(/usr/sbin/system_profiler SPHardwareDataType -json 2>/dev/null || true)
+    physical_memory=$(print -r -- "$hardware_json" | /usr/bin/plutil -extract SPHardwareDataType.0.physical_memory raw -o - - 2>/dev/null || true)
+    total=$(print -r -- "$physical_memory" | /usr/bin/awk '{
+      value = $1 + 0
+      unit = toupper($2)
+      if (unit == "TB") value *= 1099511627776
+      else if (unit == "GB") value *= 1073741824
+      else if (unit == "MB") value *= 1048576
+      else if (unit == "KB") value *= 1024
+      printf "%.0f", value
+    }')
+    nonnegative_integer "$total"
+    total=$REPLY
+  fi
+  vm_output=$(/usr/bin/vm_stat 2>/dev/null || true)
+  page_size=$(print -r -- "$vm_output" | /usr/bin/awk 'NR == 1 { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit } }')
+  nonnegative_integer "$page_size"
+  page_size=$REPLY
+  (( page_size > 0 )) || page_size=4096
+
+  free=$(print -r -- "$vm_output" | /usr/bin/awk -F: '$1 == "Pages free" { gsub(/[^0-9]/, "", $2); print $2 }')
+  inactive=$(print -r -- "$vm_output" | /usr/bin/awk -F: '$1 == "Pages inactive" { gsub(/[^0-9]/, "", $2); print $2 }')
+  speculative=$(print -r -- "$vm_output" | /usr/bin/awk -F: '$1 == "Pages speculative" { gsub(/[^0-9]/, "", $2); print $2 }')
+  file_backed=$(print -r -- "$vm_output" | /usr/bin/awk -F: '$1 == "File-backed pages" { gsub(/[^0-9]/, "", $2); print $2 }')
+  nonnegative_integer "$free"; free=$REPLY
+  nonnegative_integer "$inactive"; inactive=$REPLY
+  nonnegative_integer "$speculative"; speculative=$REPLY
+  nonnegative_integer "$file_backed"; file_backed=$REPLY
+  available=$(( (free + inactive + speculative) * page_size ))
+  (( available <= total )) || available=$total
+  used=$(( total - available ))
+  cached=$(( file_backed * page_size ))
+  (( cached <= total )) || cached=$total
+
+  swap_line=$(sysctl_value vm.swapusage)
+  swap_total=$(print -r -- "$swap_line" | /usr/bin/awk '{
+    for (i = 1; i <= NF; i++) if ($i == "total") value = $(i + 2)
+    multiplier = 1
+    if (value ~ /T$/) multiplier = 1099511627776
+    else if (value ~ /G$/) multiplier = 1073741824
+    else if (value ~ /M$/) multiplier = 1048576
+    else if (value ~ /K$/) multiplier = 1024
+    gsub(/[KMGT]$/, "", value)
+    printf "%.0f", value * multiplier
+  }')
+  swap_used=$(print -r -- "$swap_line" | /usr/bin/awk '{
+    for (i = 1; i <= NF; i++) if ($i == "used") value = $(i + 2)
+    multiplier = 1
+    if (value ~ /T$/) multiplier = 1099511627776
+    else if (value ~ /G$/) multiplier = 1073741824
+    else if (value ~ /M$/) multiplier = 1048576
+    else if (value ~ /K$/) multiplier = 1024
+    gsub(/[KMGT]$/, "", value)
+    printf "%.0f", value * multiplier
+  }')
+  nonnegative_integer "$swap_total"; swap_total=$REPLY
+  nonnegative_integer "$swap_used"; swap_used=$REPLY
+  (( swap_used <= swap_total )) || swap_used=$swap_total
+
+  boot_time=$(sysctl_value kern.boottime | /usr/bin/awk -F'[=,]' '{ gsub(/[^0-9]/, "", $2); print $2 }')
+  nonnegative_integer "$boot_time"; boot_time=$REPLY
+  now=$(/bin/date +%s)
+  uptime=0
+  (( boot_time > 0 && now >= boot_time )) && uptime=$(( now - boot_time ))
+
+  write_row "$metadata_file" memory_total "$total"
+  write_row "$metadata_file" memory_used "$used"
+  write_row "$metadata_file" memory_available "$available"
+  write_row "$metadata_file" memory_cached "$cached"
+  write_row "$metadata_file" swap_total "$swap_total"
+  write_row "$metadata_file" swap_used "$swap_used"
+  write_row "$metadata_file" uptime "$uptime"
+}
+
+collect_filesystems() {
+  local inventory_file=$1
+  local line device mount_point filesystem_type options stats total used available key
+  while IFS= read -r line; do
+    if [[ $line =~ '^(.+) on (.+) \(([^,()]+)(, (.*))?\)$' ]]; then
+      device=$match[1]
+      mount_point=$match[2]
+      filesystem_type=$match[3]
+      options=${match[5]:-}
+    else
+      continue
+    fi
+    case $filesystem_type in
+      devfs|autofs|procfs) continue ;;
+    esac
+    stats=(${(z)"$(/bin/df -kP "$mount_point" 2>/dev/null | /usr/bin/tail -n 1)"})
+    (( ${#stats} >= 4 )) || continue
+    nonnegative_integer "${stats[2]:-0}"; total=$(( REPLY * 1024 ))
+    nonnegative_integer "${stats[3]:-0}"; used=$(( REPLY * 1024 ))
+    nonnegative_integer "${stats[4]:-0}"; available=$(( REPLY * 1024 ))
+    (( total > 0 )) || continue
+    (( used <= total )) || used=$total
+    (( available <= total )) || available=$total
+    key="$device|$mount_point"
+    write_row "$inventory_file" "$key" "$device" "$filesystem_type" "$mount_point" "$options" "$total" "$used" "$available"
+  done < <(/sbin/mount 2>/dev/null)
+}
+
+read_network_counters() {
+  local interface=$1 counters=$2
+  print -r -- "$counters" | /usr/bin/awk -v target="$interface" '
+    NR == 1 {
+      for (i = 1; i <= NF; i++) column[$i] = i
+      next
+    }
+    $1 == target && $3 ~ /^<Link#/ {
+      rxp = column["Ipkts"] ? $(column["Ipkts"]) : 0
+      rxb = column["Ibytes"] ? $(column["Ibytes"]) : 0
+      txp = column["Opkts"] ? $(column["Opkts"]) : 0
+      txb = column["Obytes"] ? $(column["Obytes"]) : 0
+      print rxb, txb, rxp, txp
+      exit
+    }
+  '
+}
+
+collect_network() {
+  local interface_file=$1 address_file=$2
+  local default_interface interfaces interface details mac mtu link_up counters netstat_output interface_status
+  local rx_bytes tx_bytes rx_packets tx_packets rx_delta tx_delta rx_packet_delta tx_packet_delta
+  local line address mask prefix scope fallback_primary=''
+
+  default_interface=$(/sbin/route -n get default 2>/dev/null | /usr/bin/awk '$1 == "interface:" { print $2; exit }' || true)
+  interfaces=$(/sbin/ifconfig -l 2>/dev/null || true)
+  netstat_output=$(/usr/sbin/netstat -ibn 2>/dev/null || true)
+  for interface in ${=interfaces}; do
+    details=$(/sbin/ifconfig "$interface" 2>/dev/null || true)
+    [[ -n $details ]] || continue
+    mac=$(print -r -- "$details" | /usr/bin/awk '$1 == "ether" { print tolower($2); exit }')
+    mtu=$(print -r -- "$details" | /usr/bin/awk 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "mtu") { print $(i + 1); exit } }')
+    nonnegative_integer "$mtu"; mtu=$REPLY
+    link_up=false
+    interface_status=$(print -r -- "$details" | /usr/bin/awk '$1 == "status:" { print $2; exit }')
+    if [[ $interface == lo0 || $interface_status == active ]] || \
+       [[ -z $interface_status && ${details%%$'\n'*} == *'<UP,'* ]]; then
+      link_up=true
+    fi
+
+    counters=$(read_network_counters "$interface" "$netstat_output")
+    rx_bytes=${${=counters}[1]:-0}
+    tx_bytes=${${=counters}[2]:-0}
+    rx_packets=${${=counters}[3]:-0}
+    tx_packets=${${=counters}[4]:-0}
+    nonnegative_integer "$rx_bytes"; rx_bytes=$REPLY
+    nonnegative_integer "$tx_bytes"; tx_bytes=$REPLY
+    nonnegative_integer "$rx_packets"; rx_packets=$REPLY
+    nonnegative_integer "$tx_packets"; tx_packets=$REPLY
+
+    rx_delta=0; tx_delta=0; rx_packet_delta=0; tx_packet_delta=0
+    if [[ -n ${PREVIOUS_RX_BYTES[$interface]:-} ]] && (( rx_bytes >= PREVIOUS_RX_BYTES[$interface] )); then
+      rx_delta=$(( rx_bytes - PREVIOUS_RX_BYTES[$interface] ))
+    fi
+    if [[ -n ${PREVIOUS_TX_BYTES[$interface]:-} ]] && (( tx_bytes >= PREVIOUS_TX_BYTES[$interface] )); then
+      tx_delta=$(( tx_bytes - PREVIOUS_TX_BYTES[$interface] ))
+    fi
+    if [[ -n ${PREVIOUS_RX_PACKETS[$interface]:-} ]] && (( rx_packets >= PREVIOUS_RX_PACKETS[$interface] )); then
+      rx_packet_delta=$(( rx_packets - PREVIOUS_RX_PACKETS[$interface] ))
+    fi
+    if [[ -n ${PREVIOUS_TX_PACKETS[$interface]:-} ]] && (( tx_packets >= PREVIOUS_TX_PACKETS[$interface] )); then
+      tx_packet_delta=$(( tx_packets - PREVIOUS_TX_PACKETS[$interface] ))
+    fi
+    PREVIOUS_RX_BYTES[$interface]=$rx_bytes
+    PREVIOUS_TX_BYTES[$interface]=$tx_bytes
+    PREVIOUS_RX_PACKETS[$interface]=$rx_packets
+    PREVIOUS_TX_PACKETS[$interface]=$tx_packets
+
+    write_row "$interface_file" "$interface" "$interface" "$mac" "$mtu" 0 "$link_up" \
+      "$rx_bytes" "$tx_bytes" "$rx_delta" "$tx_delta" "$rx_packet_delta" "$tx_packet_delta"
+
+    while IFS= read -r line; do
+      if [[ $line =~ '^[[:space:]]*inet[[:space:]]+([0-9.]+)[[:space:]]+netmask[[:space:]]+(0x[0-9a-fA-F]+)' ]]; then
+        address=$match[1]
+        mask=$match[2]
+        ipv4_prefix_length "$mask"; prefix=$REPLY
+      elif [[ $line =~ '^[[:space:]]*inet6[[:space:]]+([^[:space:]]+)[[:space:]]+prefixlen[[:space:]]+([0-9]+)' ]]; then
+        address=${match[1]%%%*}
+        prefix=$match[2]
+      else
+        continue
+      fi
+      address_scope "$address"; scope=$REPLY
+      write_row "$address_file" "$interface" "$address/$prefix" "$scope"
+      if [[ $interface == $default_interface && $scope != host && $scope != link && -z ${PRIMARY_IP:-} ]]; then
+        typeset -g PRIMARY_IP=$address
+      elif [[ -z $fallback_primary && $scope != host && $scope != link ]]; then
+        fallback_primary=$address
+      fi
+    done <<< "$details"
+  done
+  [[ -n ${PRIMARY_IP:-} ]] || typeset -g PRIMARY_IP=$fallback_primary
+}
+
+write_jxa_renderer() {
+  local destination=$1
+  /bin/cat > "$destination" <<'JAVASCRIPT'
+ObjC.import('Foundation');
+
+function readRows(path) {
+  var error = Ref();
+  var value = $.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, error);
+  if (!value) throw new Error('cannot read collection data: ' + path);
+  var text = ObjC.unwrap(value);
+  if (!text) return [];
+  var lines = text.replace(/\n$/, '').split('\n');
+  var result = [];
+  for (var i = 0; i < lines.length; i++) {
+    if (lines[i] !== '') result.push(lines[i].split('\t'));
+  }
+  return result;
+}
+
+function utf8Compare(left, right) {
+  var a = unescape(encodeURIComponent(String(left)));
+  var b = unescape(encodeURIComponent(String(right)));
+  return a < b ? -1 : (a > b ? 1 : 0);
+}
+
+function number(value) {
+  var result = Number(value || 0);
+  return isFinite(result) && result >= 0 ? result : 0;
+}
+
+function metadata(rows) {
+  var result = {};
+  for (var i = 0; i < rows.length; i++) result[rows[i][0]] = rows[i][1] || '';
+  return result;
+}
+
+function goJSONStringify(value) {
+  return JSON.stringify(value)
+    .replace(/&/g, '\\u0026')
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
+function run(argv) {
+  var meta = metadata(readRows(argv[0]));
+  var cpuRows = readRows(argv[1]);
+  var filesystemRows = readRows(argv[2]);
+  var interfaceRows = readRows(argv[3]);
+  var addressRows = readRows(argv[4]);
+
+  var cpuPackages = [];
+  for (var i = 0; i < cpuRows.length; i++) {
+    var cpu = {
+      key: cpuRows[i][0],
+      package_index: number(cpuRows[i][1])
+    };
+    if (cpuRows[i][2]) cpu.vendor = cpuRows[i][2];
+    cpu.model_name = cpuRows[i][3];
+    cpu.physical_cores = number(cpuRows[i][4]);
+    cpu.logical_threads = number(cpuRows[i][5]);
+    if (number(cpuRows[i][6]) > 0) cpu.performance_cores = number(cpuRows[i][6]);
+    if (number(cpuRows[i][7]) > 0) cpu.efficiency_cores = number(cpuRows[i][7]);
+    if (number(cpuRows[i][8]) > 0) cpu.max_frequency_mhz = number(cpuRows[i][8]);
+    cpuPackages.push(cpu);
+  }
+  cpuPackages.sort(function (a, b) { return utf8Compare(a.key, b.key); });
+
+  var memoryModules = [{
+    key: 'system-memory-aggregate',
+    slot_name: 'aggregate',
+    model_name: 'Unified/System Memory (macOS aggregate)',
+    size_bytes: number(meta.memory_total)
+  }];
+
+  var filesystems = [];
+  var filesystemMetrics = [];
+  for (var f = 0; f < filesystemRows.length; f++) {
+    var options = filesystemRows[f][4] ? filesystemRows[f][4].split(',') : [];
+    for (var o = 0; o < options.length; o++) options[o] = options[o].replace(/^\s+|\s+$/g, '');
+    options = options.filter(function (item) { return item !== ''; });
+    options.sort(utf8Compare);
+    var filesystem = {
+      key: filesystemRows[f][0],
+      device_name: filesystemRows[f][1],
+      filesystem_type: filesystemRows[f][2],
+      mount_point: filesystemRows[f][3]
+    };
+    if (options.length) filesystem.mount_options = options;
+    filesystems.push(filesystem);
+    filesystemMetrics.push({
+      filesystem_key: filesystemRows[f][0],
+      total_bytes: number(filesystemRows[f][5]),
+      used_bytes: number(filesystemRows[f][6]),
+      available_bytes: number(filesystemRows[f][7])
+    });
+  }
+  filesystems.sort(function (a, b) { return utf8Compare(a.key, b.key); });
+  filesystemMetrics.sort(function (a, b) { return utf8Compare(a.filesystem_key, b.filesystem_key); });
+
+  var addressesByInterface = {};
+  for (var a = 0; a < addressRows.length; a++) {
+    if (!addressesByInterface[addressRows[a][0]]) addressesByInterface[addressRows[a][0]] = [];
+    addressesByInterface[addressRows[a][0]].push({ address: addressRows[a][1], scope: addressRows[a][2] });
+  }
+  var networkInterfaces = [];
+  var networkMetrics = [];
+  for (var n = 0; n < interfaceRows.length; n++) {
+    var key = interfaceRows[n][0];
+    var network = { key: key, name: interfaceRows[n][1] };
+    if (interfaceRows[n][2]) network.mac_address = interfaceRows[n][2];
+    if (number(interfaceRows[n][3]) > 0) network.mtu = number(interfaceRows[n][3]);
+    if (number(interfaceRows[n][4]) > 0) network.link_speed_mbps = number(interfaceRows[n][4]);
+    var addresses = addressesByInterface[key] || [];
+    addresses.sort(function (left, right) { return utf8Compare(left.address, right.address); });
+    if (addresses.length) network.addresses = addresses;
+    networkInterfaces.push(network);
+    networkMetrics.push({
+      interface_key: key,
+      link_up: interfaceRows[n][5] === 'true',
+      rx_bytes_total: number(interfaceRows[n][6]),
+      tx_bytes_total: number(interfaceRows[n][7]),
+      rx_bytes_delta: number(interfaceRows[n][8]),
+      tx_bytes_delta: number(interfaceRows[n][9]),
+      rx_packets_delta: number(interfaceRows[n][10]),
+      tx_packets_delta: number(interfaceRows[n][11]),
+      rx_errors_delta: 0,
+      tx_errors_delta: 0,
+      rx_dropped_delta: 0,
+      tx_dropped_delta: 0
+    });
+  }
+  networkInterfaces.sort(function (a, b) { return utf8Compare(a.key, b.key); });
+  networkMetrics.sort(function (a, b) { return utf8Compare(a.interface_key, b.interface_key); });
+
+  var inventory = {
+    cpu_packages: cpuPackages,
+    memory_modules: memoryModules,
+    block_devices: [],
+    filesystems: filesystems,
+    network_interfaces: networkInterfaces
+  };
+
+  var labels = {};
+  if (meta.labels) labels = JSON.parse(meta.labels);
+  if (!labels || Array.isArray(labels) || typeof labels !== 'object') throw new Error('labels must be a JSON object');
+  Object.keys(labels).forEach(function (key) {
+    if (typeof labels[key] !== 'string') throw new Error('label values must be strings');
+  });
+
+  var agent = {
+    id: meta.agent_id,
+    hostname: meta.hostname,
+    os_name: 'macOS',
+    os_version: meta.os_version,
+    kernel_version: meta.kernel_version,
+    architecture: meta.architecture,
+    agent_version: meta.agent_version,
+    machine_type: meta.machine_type,
+    system_model: meta.system_model
+  };
+  if (meta.primary_ip) agent.primary_ip = meta.primary_ip;
+  if (Object.keys(labels).length) agent.labels = labels;
+
+  var report = {
+    version: 1,
+    collected_at: meta.collected_at,
+    interval_seconds: number(meta.interval_seconds),
+    inventory_fingerprint: '__INVENTORY_FINGERPRINT__',
+    agent: agent,
+    inventory: inventory,
+    metrics: {
+      cpu: {
+        usage_percent: number(meta.cpu_usage),
+        load_1: number(meta.load_1),
+        load_5: number(meta.load_5),
+        load_15: number(meta.load_15)
+      },
+      memory: {
+        total_bytes: number(meta.memory_total),
+        used_bytes: number(meta.memory_used),
+        available_bytes: number(meta.memory_available),
+        cached_bytes: number(meta.memory_cached),
+        buffers_bytes: 0,
+        swap_total_bytes: number(meta.swap_total),
+        swap_used_bytes: number(meta.swap_used),
+        uptime_seconds: number(meta.uptime)
+      },
+      disk: {
+        read_bytes_total: 0,
+        write_bytes_total: 0,
+        read_bytes_delta: 0,
+        write_bytes_delta: 0,
+        read_ops_delta: 0,
+        write_ops_delta: 0
+      },
+      filesystems: filesystemMetrics,
+      network: networkMetrics
+    }
+  };
+  return goJSONStringify(inventory) + '\n' + JSON.stringify(report);
+}
+JAVASCRIPT
+}
+
+collect_report() {
+  local interval_seconds=$1
+  local temporary_directory metadata_file cpu_file filesystem_file interface_file address_file renderer
+  local architecture model physical_cores logical_threads performance_cores efficiency_cores vendor frequency cpu_usage load_line load1 load5 load15
+  local performance_levels performance_level performance_name performance_level_cores
+  local hostname os_version kernel_version machine_type generated inventory_json payload_json fingerprint hardware_json labels
+
+  temporary_directory=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/server-status-macos.XXXXXX") || return 1
+  metadata_file="$temporary_directory/metadata.tsv"
+  cpu_file="$temporary_directory/cpu.tsv"
+  filesystem_file="$temporary_directory/filesystems.tsv"
+  interface_file="$temporary_directory/interfaces.tsv"
+  address_file="$temporary_directory/addresses.tsv"
+  renderer="$temporary_directory/render.js"
+  : > "$metadata_file"
+  : > "$cpu_file"
+  : > "$filesystem_file"
+  : > "$interface_file"
+  : > "$address_file"
+
+  architecture=$(/usr/bin/uname -m)
+  [[ $architecture == x86_64 ]] && architecture=amd64
+  hardware_json=''
+  model=$(sysctl_value machdep.cpu.brand_string)
+  if [[ -z $model ]]; then
+    hardware_json=$(/usr/sbin/system_profiler SPHardwareDataType -json 2>/dev/null || true)
+    model=$(print -r -- "$hardware_json" | /usr/bin/plutil -extract SPHardwareDataType.0.chip_type raw -o - - 2>/dev/null || true)
+  fi
+  [[ -n $model ]] || model=$(sysctl_value hw.model)
+  [[ -n $model ]] || model='Mac Processor'
+  physical_cores=$(sysctl_value hw.physicalcpu)
+  logical_threads=$(sysctl_value hw.logicalcpu)
+  nonnegative_integer "$physical_cores"; physical_cores=$REPLY
+  nonnegative_integer "$logical_threads"; logical_threads=$REPLY
+  if (( logical_threads == 0 )); then
+    logical_threads=$(/usr/bin/hostinfo 2>/dev/null | /usr/bin/awk '/processors are logically available/ { print $1; exit }')
+    nonnegative_integer "$logical_threads"; logical_threads=$REPLY
+  fi
+  (( physical_cores > 0 )) || physical_cores=$logical_threads
+  (( physical_cores > 0 )) || physical_cores=1
+  (( logical_threads >= physical_cores )) || logical_threads=$physical_cores
+  performance_cores=0
+  efficiency_cores=0
+  performance_levels=$(sysctl_value hw.nperflevels)
+  nonnegative_integer "$performance_levels"; performance_levels=$REPLY
+  for (( performance_level = 0; performance_level < performance_levels; performance_level++ )); do
+    performance_name=$(sysctl_value "hw.perflevel${performance_level}.name")
+    performance_level_cores=$(sysctl_value "hw.perflevel${performance_level}.physicalcpu")
+    nonnegative_integer "$performance_level_cores"; performance_level_cores=$REPLY
+    case ${performance_name:l} in
+      performance*) performance_cores=$(( performance_cores + performance_level_cores )) ;;
+      efficiency*) efficiency_cores=$(( efficiency_cores + performance_level_cores )) ;;
+    esac
+  done
+  if (( performance_cores + efficiency_cores != physical_cores )); then
+    performance_cores=0
+    efficiency_cores=0
+  fi
+  if [[ $architecture == arm64 ]]; then
+    vendor=Apple
+  else
+    vendor=$(sysctl_value machdep.cpu.vendor)
+  fi
+  frequency=$(sysctl_value hw.cpufrequency_max)
+  nonnegative_integer "$frequency"; frequency=$(( REPLY / 1000000 ))
+  write_row "$cpu_file" cpu-package-0 0 "$vendor" "$model" "$physical_cores" "$logical_threads" \
+    "$performance_cores" "$efficiency_cores" "$frequency"
+
+  read_cpu_usage; cpu_usage=$REPLY
+  load_line=$(sysctl_value vm.loadavg)
+  if [[ -z $load_line ]]; then
+    load_line=$(/usr/bin/uptime 2>/dev/null | /usr/bin/sed 's/^.*load averages*: //' || true)
+  fi
+  load1=$(print -r -- "$load_line" | /usr/bin/awk '{ gsub(/[{}]/, ""); print $1 + 0 }')
+  load5=$(print -r -- "$load_line" | /usr/bin/awk '{ gsub(/[{}]/, ""); print $2 + 0 }')
+  load15=$(print -r -- "$load_line" | /usr/bin/awk '{ gsub(/[{}]/, ""); print $3 + 0 }')
+  [[ $load1 == <->(|.<->) ]] || load1=0
+  [[ $load5 == <->(|.<->) ]] || load5=0
+  [[ $load15 == <->(|.<->) ]] || load15=0
+
+  typeset -g PRIMARY_IP=''
+  collect_filesystems "$filesystem_file"
+  collect_network "$interface_file" "$address_file"
+  read_memory_metrics "$metadata_file"
+
+  hostname=$(/bin/hostname -s 2>/dev/null || /bin/hostname)
+  os_version=$(/usr/bin/sw_vers -productVersion 2>/dev/null || true)
+  kernel_version=$(/usr/bin/uname -r)
+  machine_type=physical
+  [[ $(sysctl_value kern.hv_vmm_present) == 1 ]] && machine_type=virtual
+  model=$(sysctl_value hw.model)
+  if [[ -z $model && -z $hardware_json ]]; then
+    hardware_json=$(/usr/sbin/system_profiler SPHardwareDataType -json 2>/dev/null || true)
+  fi
+  [[ -n $model ]] || model=$(print -r -- "$hardware_json" | /usr/bin/plutil -extract SPHardwareDataType.0.machine_model raw -o - - 2>/dev/null || true)
+
+  write_row "$metadata_file" agent_id "$SERVER_STATUS_AGENT_ID"
+  write_row "$metadata_file" hostname "$hostname"
+  write_row "$metadata_file" os_version "$os_version"
+  write_row "$metadata_file" kernel_version "$kernel_version"
+  write_row "$metadata_file" architecture "$architecture"
+  write_row "$metadata_file" agent_version "$AGENT_VERSION"
+  write_row "$metadata_file" machine_type "$machine_type"
+  write_row "$metadata_file" system_model "$model"
+  write_row "$metadata_file" primary_ip "$PRIMARY_IP"
+  labels=${SERVER_STATUS_LABELS:-}
+  [[ -n $labels ]] || labels='{}'
+  write_row "$metadata_file" labels "$labels"
+  write_row "$metadata_file" collected_at "$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  write_row "$metadata_file" interval_seconds "$interval_seconds"
+  write_row "$metadata_file" cpu_usage "$cpu_usage"
+  write_row "$metadata_file" load_1 "$load1"
+  write_row "$metadata_file" load_5 "$load5"
+  write_row "$metadata_file" load_15 "$load15"
+
+  write_jxa_renderer "$renderer"
+  generated=$(/usr/bin/osascript -l JavaScript "$renderer" "$metadata_file" "$cpu_file" "$filesystem_file" "$interface_file" "$address_file" 2>&1)
+  if (( $? != 0 )) || [[ $generated != *$'\n'* ]]; then
+    /bin/rm -rf -- "$temporary_directory"
+    fail "cannot serialize report: $generated"
+    return 1
+  fi
+  inventory_json=${generated%%$'\n'*}
+  payload_json=${generated#*$'\n'}
+  fingerprint=$(print -rn -- "$inventory_json" | /usr/bin/shasum -a 256 | /usr/bin/awk '{ print $1 }')
+  REPORT_PAYLOAD=${payload_json/__INVENTORY_FINGERPRINT__/$fingerprint}
+  /bin/rm -rf -- "$temporary_directory"
+  return 0
+}
+
+version_is_newer() {
+  local current=${1#v} target=${2#v}
+  local pattern='^([0-9]+)[.]([0-9]+)[.]([0-9]+)([.-]([0-9A-Za-z.-]+))?$'
+  local current_major current_minor current_patch current_prerelease
+  local target_major target_minor target_patch target_prerelease
+  local current_number target_number current_part target_part
+  local -a current_parts target_parts
+  local -i index limit
+
+  [[ $current =~ $pattern ]] || return 1
+  current_major=$match[1]; current_minor=$match[2]; current_patch=$match[3]; current_prerelease=${match[5]:-}
+  [[ $target =~ $pattern ]] || return 1
+  target_major=$match[1]; target_minor=$match[2]; target_patch=$match[3]; target_prerelease=${match[5]:-}
+
+  for index in 1 2 3; do
+    case $index in
+      1) current_number=$current_major; target_number=$target_major ;;
+      2) current_number=$current_minor; target_number=$target_minor ;;
+      *) current_number=$current_patch; target_number=$target_patch ;;
+    esac
+    (( target_number > current_number )) && return 0
+    (( target_number < current_number )) && return 1
+  done
+
+  [[ -n $current_prerelease ]] || return 1
+  [[ -n $target_prerelease ]] || return 0
+  current_parts=(${(s:.:)current_prerelease})
+  target_parts=(${(s:.:)target_prerelease})
+  limit=$(( ${#current_parts} < ${#target_parts} ? ${#current_parts} : ${#target_parts} ))
+  for (( index = 1; index <= limit; index++ )); do
+    current_part=${current_parts[index]}
+    target_part=${target_parts[index]}
+    if [[ $current_part == <-> && $target_part == <-> ]]; then
+      (( target_part > current_part )) && return 0
+      (( target_part < current_part )) && return 1
+    elif [[ $current_part == <-> ]]; then
+      return 0
+    elif [[ $target_part == <-> ]]; then
+      return 1
+    else
+      [[ $target_part > $current_part ]] && return 0
+      [[ $target_part < $current_part ]] && return 1
+    fi
+  done
+  (( ${#target_parts} > ${#current_parts} ))
+}
+
+read_requested_update() {
+  local response_file=$1
+  REPLY=$(/usr/bin/osascript -l JavaScript -e '
+    ObjC.import("Foundation");
+    function run(argv) {
+      var error = Ref();
+      var value = $.NSString.stringWithContentsOfFileEncodingError(argv[0], $.NSUTF8StringEncoding, error);
+      if (!value) return "";
+      var receipt = JSON.parse(ObjC.unwrap(value));
+      return receipt.agent_update && typeof receipt.agent_update.version === "string"
+        ? receipt.agent_update.version : "";
+    }
+  ' "$response_file" 2>/dev/null || true)
+}
+
+apply_update() {
+  local requested_version=$1 target_version=${1#v}
+  local asset='server-status-agent-macos' release_base temporary_directory expected_checksum actual_checksum
+  local candidate candidate_version target_path replacement owner group
+
+  if ! version_is_newer "$AGENT_VERSION" "$target_version"; then
+    fail "refusing Agent update from $AGENT_VERSION to $requested_version"
+    return 1
+  fi
+  release_base="${SERVER_STATUS_URL%/}/agent/releases/v$target_version"
+  temporary_directory=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/server-status-update.XXXXXX") || return 1
+  candidate="$temporary_directory/$asset"
+
+  if ! /usr/bin/curl -fsSL --connect-timeout 15 --max-time 300 --max-filesize 1048576 \
+      "$release_base/checksums.txt" -o "$temporary_directory/checksums.txt" ||
+     ! /usr/bin/curl -fsSL --connect-timeout 15 --max-time 300 --max-filesize 1048576 \
+      "$release_base/$asset" -o "$candidate"; then
+    /bin/rm -rf -- "$temporary_directory"
+    fail "cannot download Agent update $target_version"
+    return 1
+  fi
+
+  expected_checksum=$(/usr/bin/awk -v asset="$asset" '$2 == asset { print tolower($1); exit }' "$temporary_directory/checksums.txt")
+  actual_checksum=$(/usr/bin/shasum -a 256 "$candidate" | /usr/bin/awk '{ print $1 }')
+  if [[ ! $expected_checksum =~ '^[0-9a-f]{64}$' || $actual_checksum != $expected_checksum ]]; then
+    /bin/rm -rf -- "$temporary_directory"
+    fail "SHA-256 verification failed for Agent update $target_version"
+    return 1
+  fi
+  if ! /bin/zsh -n "$candidate"; then
+    /bin/rm -rf -- "$temporary_directory"
+    fail "downloaded Agent update has invalid zsh syntax"
+    return 1
+  fi
+  candidate_version=$(/bin/zsh "$candidate" --version 2>/dev/null || true)
+  if [[ ${candidate_version#v} != $target_version ]]; then
+    /bin/rm -rf -- "$temporary_directory"
+    fail "downloaded Agent reports version ${candidate_version:-unknown}, expected $target_version"
+    return 1
+  fi
+
+  target_path=$AGENT_PATH
+  [[ -f $target_path ]] || { /bin/rm -rf -- "$temporary_directory"; fail "cannot locate current Agent script"; return 1; }
+  replacement=$(/usr/bin/mktemp "${target_path}.update.XXXXXX") || { /bin/rm -rf -- "$temporary_directory"; return 1; }
+  if ! /bin/cp "$candidate" "$replacement" || ! /bin/chmod 0755 "$replacement"; then
+    /bin/rm -f -- "$replacement"
+    /bin/rm -rf -- "$temporary_directory"
+    fail "cannot stage Agent update beside $target_path"
+    return 1
+  fi
+  owner=$(/usr/bin/stat -f '%u' "$target_path")
+  group=$(/usr/bin/stat -f '%g' "$target_path")
+  if ! /usr/sbin/chown "$owner:$group" "$replacement" || ! /bin/mv -f "$replacement" "$target_path"; then
+    /bin/rm -f -- "$replacement"
+    /bin/rm -rf -- "$temporary_directory"
+    fail "cannot atomically install Agent update $target_version"
+    return 1
+  fi
+  /bin/rm -rf -- "$temporary_directory"
+  log_message info "Agent update installed target_version=$target_version"
+  return 0
+}
+
+send_report_once() {
+  local payload=$1 temporary_directory curl_config response_file http_status token
+  temporary_directory=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/server-status-send.XXXXXX") || return 1
+  curl_config="$temporary_directory/curl.conf"
+  response_file="$temporary_directory/response.json"
+  SEND_RETRYABLE=false
+  REQUESTED_UPDATE_VERSION=''
+  token=${SERVER_STATUS_TOKEN//\\/\\\\}
+  token=${token//\"/\\\"}
+  {
+    print -r -- 'silent'
+    print -r -- 'show-error'
+    print -r -- 'connect-timeout = 15'
+    print -r -- 'max-time = 30'
+    print -r -- 'header = "Content-Type: application/json"'
+    print -r -- "header = \"Authorization: Bearer $token\""
+  } > "$curl_config"
+  /bin/chmod 0600 "$curl_config"
+  print -rn -- "$payload" > "$temporary_directory/report.json"
+  : > "$response_file"
+  http_status=$(/usr/bin/curl --config "$curl_config" --request POST --data-binary "@$temporary_directory/report.json" \
+    --output "$response_file" --write-out '%{http_code}' "${SERVER_STATUS_URL%/}/api/v1/reports" 2>"$temporary_directory/curl.error")
+  if [[ $http_status == 202 ]] && /usr/bin/grep -q '"status"[[:space:]]*:[[:space:]]*"accepted"' "$response_file"; then
+    read_requested_update "$response_file"
+    REQUESTED_UPDATE_VERSION=$REPLY
+    /bin/rm -rf -- "$temporary_directory"
+    return 0
+  fi
+  local error_text response_text
+  error_text=$(<"$temporary_directory/curl.error")
+  response_text=$(<"$response_file")
+  if [[ -z $http_status || $http_status == 000 || $http_status == 408 || $http_status == 425 || $http_status == 429 || $http_status == 5* ]]; then
+    SEND_RETRYABLE=true
+  fi
+  /bin/rm -rf -- "$temporary_directory"
+  fail "report rejected status=${http_status:-unavailable} response=${response_text:-$error_text}"
+  return 1
+}
+
+send_report() {
+  local payload=$1 attempt
+  for attempt in 1 2 3; do
+    if send_report_once "$payload"; then
+      log_message info 'report accepted'
+      if [[ -n $REQUESTED_UPDATE_VERSION ]]; then
+        log_message info "Agent update requested current_version=$AGENT_VERSION target_version=$REQUESTED_UPDATE_VERSION"
+        if apply_update "$REQUESTED_UPDATE_VERSION"; then
+          exit 0
+        fi
+      fi
+      return 0
+    fi
+    [[ $SEND_RETRYABLE == true ]] || return 1
+    (( attempt < 3 )) && /bin/sleep $(( 1 << (attempt - 1) ))
+  done
+  return 1
+}
+
+load_config() {
+  local config_path=$1
+  [[ -r $config_path ]] || { fail "configuration is not readable: $config_path"; return 1; }
+  source "$config_path"
+  [[ ${SERVER_STATUS_URL:-} == http://* || ${SERVER_STATUS_URL:-} == https://* ]] || { fail 'SERVER_STATUS_URL must use http or https'; return 1; }
+  [[ ${SERVER_STATUS_AGENT_ID:-} =~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$' ]] || { fail 'SERVER_STATUS_AGENT_ID must be an RFC 4122 UUID'; return 1; }
+  [[ -n ${SERVER_STATUS_TOKEN:-} ]] || { fail 'SERVER_STATUS_TOKEN is required'; return 1; }
+  SERVER_STATUS_INTERVAL_SECONDS=${SERVER_STATUS_INTERVAL_SECONDS:-60}
+  [[ $SERVER_STATUS_INTERVAL_SECONDS == <-> ]] || { fail 'SERVER_STATUS_INTERVAL_SECONDS must be an integer'; return 1; }
+  (( SERVER_STATUS_INTERVAL_SECONDS >= 10 && SERVER_STATUS_INTERVAL_SECONDS <= 3600 )) || { fail 'SERVER_STATUS_INTERVAL_SECONDS must be between 10 and 3600'; return 1; }
+  if [[ -z ${SERVER_STATUS_LABELS:-} ]]; then
+    SERVER_STATUS_LABELS='{}'
+  fi
+  return 0
+}
+
+cleanup_lock() {
+  if [[ -n ${ACTIVE_LOCK_PATH:-} ]]; then
+    /bin/rm -f -- "$ACTIVE_LOCK_PATH/pid"
+    /bin/rmdir -- "$ACTIVE_LOCK_PATH" 2>/dev/null || true
+  fi
+}
+
+acquire_lock() {
+  local lock_path=$DEFAULT_LOCK existing_pid=''
+  if /bin/mkdir "$lock_path" 2>/dev/null; then
+    print -r -- $$ > "$lock_path/pid"
+    ACTIVE_LOCK_PATH=$lock_path
+    return 0
+  fi
+  [[ -r "$lock_path/pid" ]] && existing_pid=$(<"$lock_path/pid")
+  if [[ $existing_pid == <-> ]] && /bin/kill -0 "$existing_pid" 2>/dev/null; then
+    fail "another Agent process holds $lock_path"
+    return 1
+  fi
+  /bin/rm -f -- "$lock_path/pid"
+  /bin/rmdir -- "$lock_path" 2>/dev/null || { fail "cannot remove stale lock $lock_path"; return 1; }
+  /bin/mkdir "$lock_path" || return 1
+  print -r -- $$ > "$lock_path/pid"
+  ACTIVE_LOCK_PATH=$lock_path
+}
+
+run_once() {
+  local config_path=$1 print_only=${2:-false}
+  load_config "$config_path" || return 1
+  collect_report "$SERVER_STATUS_INTERVAL_SECONDS" || return 1
+  if [[ $print_only == true ]]; then
+    print -r -- "$REPORT_PAYLOAD"
+    return 0
+  fi
+  send_report "$REPORT_PAYLOAD"
+}
+
+run_daemon() {
+  local config_path=$1
+  local last_collection=0 started interval elapsed delay
+  load_config "$config_path" || return 1
+  acquire_lock || return 1
+  trap cleanup_lock EXIT
+  trap 'exit 0' HUP INT TERM
+  while true; do
+    started=$(/bin/date +%s)
+    interval=$SERVER_STATUS_INTERVAL_SECONDS
+    if (( last_collection > 0 )); then
+      interval=$(( started - last_collection ))
+      (( interval >= 1 )) || interval=1
+      (( interval <= 3600 )) || interval=3600
+    fi
+    last_collection=$started
+    if collect_report "$interval"; then
+      send_report "$REPORT_PAYLOAD" || true
+    fi
+    elapsed=$(( $(/bin/date +%s) - started ))
+    delay=$(( SERVER_STATUS_INTERVAL_SECONDS - elapsed ))
+    (( delay > 0 )) || delay=1
+    /bin/sleep "$delay"
+  done
+}
+
+main() {
+  local command=${1:-run}
+  case $command in
+    --version|version)
+      print -r -- "$AGENT_VERSION"
+      ;;
+    run)
+      run_daemon "${2:-$DEFAULT_CONFIG}"
+      ;;
+    once)
+      run_once "${2:-$DEFAULT_CONFIG}" false
+      ;;
+    print-report)
+      run_once "${2:-$DEFAULT_CONFIG}" true
+      ;;
+    *)
+      print -u2 -r -- 'usage: server-status-agent [run|once|print-report|--version] [config-path]'
+      return 2
+      ;;
+  esac
+}
+
+if [[ ${ZSH_EVAL_CONTEXT:-} == toplevel ]]; then
+  main "$@"
+fi

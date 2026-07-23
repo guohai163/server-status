@@ -273,10 +273,11 @@ func syncCPUPackages(ctx context.Context, tx pgx.Tx, nodeID string, items []repo
 			UPDATE monitoring.cpu_packages SET
 				package_index = $3, vendor = NULLIF($4, ''), model_name = $5,
 				physical_cores = $6, logical_threads = $7,
-				max_frequency_mhz = NULLIF($8, 0), last_seen_at = $9
+				performance_cores = $8, efficiency_cores = $9,
+				max_frequency_mhz = NULLIF($10, 0), last_seen_at = $11
 			WHERE node_id = $1::uuid AND hardware_key = $2 AND removed_at IS NULL
 		`, nodeID, item.Key, item.PackageIndex, item.Vendor, item.ModelName, item.PhysicalCores,
-			item.LogicalThreads, item.MaxFrequencyMHz, at)
+			item.LogicalThreads, item.PerformanceCores, item.EfficiencyCores, item.MaxFrequencyMHz, at)
 		if err != nil {
 			return fmt.Errorf("update CPU package %q: %w", item.Key, err)
 		}
@@ -284,10 +285,11 @@ func syncCPUPackages(ctx context.Context, tx pgx.Tx, nodeID string, items []repo
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO monitoring.cpu_packages (
 					node_id, hardware_key, package_index, vendor, model_name,
-					physical_cores, logical_threads, max_frequency_mhz, first_seen_at, last_seen_at
-				) VALUES ($1::uuid, $2, $3, NULLIF($4, ''), $5, $6, $7, NULLIF($8, 0), $9, $9)
+					physical_cores, logical_threads, performance_cores, efficiency_cores,
+					max_frequency_mhz, first_seen_at, last_seen_at
+				) VALUES ($1::uuid, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, $9, NULLIF($10, 0), $11, $11)
 			`, nodeID, item.Key, item.PackageIndex, item.Vendor, item.ModelName, item.PhysicalCores,
-				item.LogicalThreads, item.MaxFrequencyMHz, at); err != nil {
+				item.LogicalThreads, item.PerformanceCores, item.EfficiencyCores, item.MaxFrequencyMHz, at); err != nil {
 				return fmt.Errorf("insert CPU package %q: %w", item.Key, err)
 			}
 		}

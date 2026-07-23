@@ -84,12 +84,14 @@ type NetworkStatus struct {
 }
 
 type CPUHardware struct {
-	PackageIndex    int     `json:"package_index"`
-	Vendor          string  `json:"vendor,omitempty"`
-	ModelName       string  `json:"model_name"`
-	PhysicalCores   int     `json:"physical_cores"`
-	LogicalThreads  int     `json:"logical_threads"`
-	MaxFrequencyMHz float64 `json:"max_frequency_mhz"`
+	PackageIndex     int     `json:"package_index"`
+	Vendor           string  `json:"vendor,omitempty"`
+	ModelName        string  `json:"model_name"`
+	PhysicalCores    int     `json:"physical_cores"`
+	LogicalThreads   int     `json:"logical_threads"`
+	PerformanceCores int     `json:"performance_cores"`
+	EfficiencyCores  int     `json:"efficiency_cores"`
+	MaxFrequencyMHz  float64 `json:"max_frequency_mhz"`
 }
 
 type MemoryHardware struct {
@@ -461,7 +463,8 @@ func (store *Store) SetPrimaryNetworkInterface(ctx context.Context, nodeID, inte
 func (store *Store) listCPUPackages(ctx context.Context, nodeID string) ([]CPUHardware, error) {
 	rows, err := store.pool.Query(ctx, `
 		SELECT package_index, COALESCE(vendor, ''), model_name, physical_cores,
-		       logical_threads, COALESCE(max_frequency_mhz, 0)::double precision
+		       logical_threads, performance_cores, efficiency_cores,
+		       COALESCE(max_frequency_mhz, 0)::double precision
 		  FROM monitoring.cpu_packages
 		 WHERE node_id = $1::uuid AND removed_at IS NULL
 		 ORDER BY package_index
@@ -473,7 +476,8 @@ func (store *Store) listCPUPackages(ctx context.Context, nodeID string) ([]CPUHa
 	result := make([]CPUHardware, 0)
 	for rows.Next() {
 		var item CPUHardware
-		if err := rows.Scan(&item.PackageIndex, &item.Vendor, &item.ModelName, &item.PhysicalCores, &item.LogicalThreads, &item.MaxFrequencyMHz); err != nil {
+		if err := rows.Scan(&item.PackageIndex, &item.Vendor, &item.ModelName, &item.PhysicalCores,
+			&item.LogicalThreads, &item.PerformanceCores, &item.EfficiencyCores, &item.MaxFrequencyMHz); err != nil {
 			return nil, fmt.Errorf("scan CPU package: %w", err)
 		}
 		result = append(result, item)

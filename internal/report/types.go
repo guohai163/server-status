@@ -56,13 +56,15 @@ type GPU struct {
 }
 
 type CPUPackage struct {
-	Key             string  `json:"key"`
-	PackageIndex    int     `json:"package_index"`
-	Vendor          string  `json:"vendor,omitempty"`
-	ModelName       string  `json:"model_name"`
-	PhysicalCores   int     `json:"physical_cores"`
-	LogicalThreads  int     `json:"logical_threads"`
-	MaxFrequencyMHz float64 `json:"max_frequency_mhz,omitempty"`
+	Key              string  `json:"key"`
+	PackageIndex     int     `json:"package_index"`
+	Vendor           string  `json:"vendor,omitempty"`
+	ModelName        string  `json:"model_name"`
+	PhysicalCores    int     `json:"physical_cores"`
+	LogicalThreads   int     `json:"logical_threads"`
+	PerformanceCores int     `json:"performance_cores,omitempty"`
+	EfficiencyCores  int     `json:"efficiency_cores,omitempty"`
+	MaxFrequencyMHz  float64 `json:"max_frequency_mhz,omitempty"`
 }
 
 type MemoryModule struct {

@@ -43,9 +43,31 @@ jobs:
       - name: Validate Windows Server 2008 R2 build
         run: ./scripts/build-release-windows-agent.sh "$GITHUB_REF_NAME" dist/windows-validation
 
+  validate-macos-agent:
+    name: Validate macOS Agent
+    runs-on: macos-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Validate script and report protocol
+        run: |
+          zsh -n macos-agent/server-status-agent
+          go test -count=1 ./internal/report
+          ./scripts/build-release-macos-agent.sh "$GITHUB_REF_NAME" dist/macos-validation
+
   release-agent:
     name: Publish Agent binaries
-    needs: validate
+    needs: [validate, validate-macos-agent]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -76,6 +98,8 @@ jobs:
           cache-dependency-path: windows-agent/go.sum
       - name: Build Windows Agent binary
         run: ./scripts/build-release-windows-agent.sh "$GITHUB_REF_NAME" dist/release
+      - name: Build macOS Agent script
+        run: ./scripts/build-release-macos-agent.sh "$GITHUB_REF_NAME" dist/release
       - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -95,7 +119,7 @@ jobs:
 
   publish-central-image:
     name: Publish central image
-    needs: validate
+    needs: [validate, validate-macos-agent]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -178,6 +202,7 @@ jobs:
             checksums.txt \
             server-status-agent-linux-amd64 \
             server-status-agent-linux-arm64 \
+            server-status-agent-macos \
             server-status-agent-windows-amd64.exe; do
             if ! grep -Fxq "$expected" <<<"$assets"; then
               echo "missing release asset: $expected" >&2
@@ -211,4 +236,5 @@ jobs:
               cd /usr/local/share/server-status/agent-releases/latest
               sha256sum -c checksums.txt
               test "$(./server-status-agent-linux-amd64 --version)" = "$EXPECTED_VERSION"
+              grep -Fq "$EXPECTED_VERSION" server-status-agent-macos
             '
