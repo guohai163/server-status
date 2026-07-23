@@ -321,6 +321,7 @@ func TestMacOSAgentInstallerIsServedWithoutCaching(t *testing.T) {
 		"Darwin", "/agent/releases/latest", "/agent/releases/v$version",
 		"server-status-agent-macos", "shasum -a 256", "LaunchDaemons",
 		"launchctl bootstrap system", "/Library/Application Support/ServerStatus",
+		`installed_version=$("$AGENT" --version`,
 	} {
 		if !bytes.Contains(response.Body.Bytes(), []byte(expected)) {
 			t.Fatalf("macOS installer response does not contain %q", expected)

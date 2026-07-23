@@ -160,7 +160,7 @@ start_byte=$((log_bytes + 1))
 attempt=0
 while [ "$attempt" -lt 30 ]; do
   if tail -c +"$start_byte" "$STDOUT_LOG" 2>/dev/null | grep -q 'level=info report accepted'; then
-    installed_version=$($AGENT --version 2>/dev/null || printf 'unknown')
+    installed_version=$("$AGENT" --version 2>/dev/null || printf 'unknown')
     echo "macOS Agent installed successfully: $installed_version"
     exit 0
   fi

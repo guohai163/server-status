@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.13.1 - 2026-07-23
+
+### Fixed
+- Quote the macOS Agent installation path when reporting the installed version.
+
 ## v0.13.0 - 2026-07-23
 
 ### Added
