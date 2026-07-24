@@ -126,6 +126,19 @@ func TestDiskCounterDeltaAggregation(t *testing.T) {
 	}
 }
 
+func TestCollectDiskIgnoresRAIDPassthroughPseudoDevices(t *testing.T) {
+	collector := NewCollector()
+	metric, err := collector.collectDisk(t.Context(), []report.BlockDevice{{
+		Key: "raid-member", DeviceName: "/dev/bus/0", DeviceKind: "disk", RAIDPassthrough: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metric != (report.DiskMetrics{}) {
+		t.Fatalf("unexpected disk counters for a RAID passthrough member: %+v", metric)
+	}
+}
+
 func TestCollectFilesystemStatsDeduplicatesUUID(t *testing.T) {
 	partitions := []disk.PartitionStat{
 		{Device: "/dev/sdb1", Mountpoint: "/data0", Fstype: "ext4"},
@@ -172,8 +185,8 @@ func TestCollectFilesystemStatsRetriesDuplicateUUIDAfterUsageFailure(t *testing.
 }
 
 func TestParseNVIDIASMIMultipleGPUs(t *testing.T) {
-	inventory, metrics := parseNVIDIASMI(`GPU-b, NVIDIA RTX 4090, 1, 88, 16384, 24564
-GPU-a, NVIDIA GeForce RTX 3060, 0, 37, 2048, 12288
+	inventory, metrics := parseNVIDIASMI(`GPU-b, NVIDIA RTX 4090, 1, 88, 16384, 24564, 72
+GPU-a, NVIDIA GeForce RTX 3060, 0, 37, 2048, 12288, 51
 `)
 	if len(inventory) != 2 || len(metrics) != 2 {
 		t.Fatalf("expected two GPUs, got inventory=%d metrics=%d", len(inventory), len(metrics))
@@ -184,11 +197,21 @@ GPU-a, NVIDIA GeForce RTX 3060, 0, 37, 2048, 12288
 	if metrics[1].GPUKey != "GPU-b" || metrics[1].UtilizationPercent != 88 || metrics[1].MemoryUsedBytes != 16384*1024*1024 {
 		t.Fatalf("unexpected second GPU metrics: %+v", metrics[1])
 	}
+	if metrics[0].TemperatureCelsius == nil || *metrics[0].TemperatureCelsius != 51 {
+		t.Fatalf("unexpected GPU temperature: %+v", metrics[0])
+	}
 }
 
 func TestParseNVIDIASMISkipsUnavailableRows(t *testing.T) {
-	inventory, metrics := parseNVIDIASMI("malformed,row\nGPU-a, NVIDIA GPU, 0, [N/A], 0, 8192\nGPU-b, NVIDIA GPU, 1, 50, 1024, 8192\n")
+	inventory, metrics := parseNVIDIASMI("malformed,row\nGPU-a, NVIDIA GPU, 0, [N/A], 0, 8192, 50\nGPU-b, NVIDIA GPU, 1, 50, 1024, 8192, 60\n")
 	if len(inventory) != 1 || len(metrics) != 1 || inventory[0].UUID != "GPU-b" {
 		t.Fatalf("expected malformed and unavailable rows to be skipped: inventory=%+v metrics=%+v", inventory, metrics)
+	}
+}
+
+func TestParseNVIDIASMIKeepsGPUWithoutTemperature(t *testing.T) {
+	inventory, metrics := parseNVIDIASMI("GPU-a, NVIDIA GPU, 0, 50, 1024, 8192, [N/A]\n")
+	if len(inventory) != 1 || len(metrics) != 1 || metrics[0].TemperatureCelsius != nil {
+		t.Fatalf("expected GPU metrics without an unavailable temperature: inventory=%+v metrics=%+v", inventory, metrics)
 	}
 }

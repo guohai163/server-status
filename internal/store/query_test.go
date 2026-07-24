@@ -45,6 +45,41 @@ func TestDiskUsageQueriesExcludeReadOnlyFilesystems(t *testing.T) {
 	}
 }
 
+func TestHistoryQueriesPreaggregateResourceMetrics(t *testing.T) {
+	for name, query := range map[string]string{"raw": rawHistorySQL, "hourly": hourlyHistorySQL} {
+		if strings.Contains(query, "JOIN LATERAL") {
+			t.Errorf("%s history query still performs per-point lateral aggregation", name)
+		}
+		for _, fragment := range []string{"GROUP BY filesystem_sample.", "GROUP BY network_sample."} {
+			if !strings.Contains(query, fragment) {
+				t.Errorf("%s history query does not contain %q", name, fragment)
+			}
+		}
+	}
+	if !strings.Contains(rawHistorySQL, "sum(disk_read_bytes_delta)") || !strings.Contains(rawHistorySQL, "sum(interval_seconds)") {
+		t.Error("raw history query does not calculate weighted throughput across time buckets")
+	}
+}
+
+func TestHistoryQueryResolution(t *testing.T) {
+	tests := []struct {
+		duration      time.Duration
+		resolution    string
+		bucketMinutes int
+	}{
+		{time.Hour, "minute", 1},
+		{6 * time.Hour, "minute", 1},
+		{24 * time.Hour, "5minute", 5},
+		{7 * 24 * time.Hour, "hour", 0},
+	}
+	for _, test := range tests {
+		spec := historyQueries(test.duration)
+		if spec.resolution != test.resolution || spec.bucketMinutes != test.bucketMinutes {
+			t.Errorf("duration %s selected resolution %q/%d, want %q/%d", test.duration, spec.resolution, spec.bucketMinutes, test.resolution, test.bucketMinutes)
+		}
+	}
+}
+
 func TestNodeSummaryQueryIncludesLoadAverages(t *testing.T) {
 	for _, field := range []string{"status.load_1", "status.load_5", "status.load_15"} {
 		if !strings.Contains(nodeSummarySQL, field) {
@@ -96,7 +131,7 @@ func TestGPUHistoryQueriesUsePerDeviceRawAndHourlyMetrics(t *testing.T) {
 		"raw": {
 			query: rawGPUHistorySQL,
 			table: "monitoring.gpu_metric_samples",
-			value: "sample.memory_usage_percent",
+			value: "avg(memory_usage_percent)",
 		},
 		"hourly": {
 			query: hourlyGPUHistorySQL,
@@ -115,6 +150,24 @@ func TestGPUHistoryQueriesUsePerDeviceRawAndHourlyMetrics(t *testing.T) {
 			if !strings.Contains(item.query, fragment) {
 				t.Errorf("%s GPU history query does not contain %q", name, fragment)
 			}
+		}
+	}
+}
+
+func TestNodeDetailQueriesIncludeHardwareHealth(t *testing.T) {
+	for _, fragment := range []string{
+		"monitoring.storage_health_current_metrics",
+		"health.read_error_rate_normalized",
+		"health.uncorrectable_sectors",
+		"device.raid_passthrough",
+	} {
+		if !strings.Contains(blockDeviceDetailSQL, fragment) {
+			t.Errorf("block device detail query does not contain %q", fragment)
+		}
+	}
+	for _, fragment := range []string{"monitoring.temperature_current_metrics", "temperature_celsius", "critical_celsius"} {
+		if !strings.Contains(temperatureDetailSQL, fragment) {
+			t.Errorf("temperature detail query does not contain %q", fragment)
 		}
 	}
 }

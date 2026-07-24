@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"golang.org/x/sys/windows/registry"
 )
 
 var (
@@ -233,9 +235,13 @@ func readMemoryStatus() (memoryStatusEx, error) {
 }
 
 func readWindowsVersion() (string, string, string) {
+	productName := readWindowsProductName()
 	info := osVersionInfoEx{Size: uint32(unsafe.Sizeof(osVersionInfoEx{}))}
 	ok, _, _ := procGetVersionExW.Call(uintptr(unsafe.Pointer(&info)))
 	if ok == 0 {
+		if productName != "" {
+			return productName, "unknown", "unknown"
+		}
 		return "Windows", "unknown", "unknown"
 	}
 	version := fmt.Sprintf("%d.%d", info.MajorVersion, info.MinorVersion)
@@ -243,20 +249,20 @@ func readWindowsVersion() (string, string, string) {
 	if servicePack != "" {
 		version += " " + servicePack
 	}
-	return windowsProductName(info.MajorVersion, info.MinorVersion), version, strconv.FormatUint(uint64(info.BuildNumber), 10)
+	return windowsProductName(productName, info.MajorVersion, info.MinorVersion), version, strconv.FormatUint(uint64(info.BuildNumber), 10)
 }
 
-func windowsProductName(major, minor uint32) string {
-	switch {
-	case major == 5 && minor == 2:
-		return "Windows Server 2003"
-	case major == 6 && minor == 0:
-		return "Windows Server 2008"
-	case major == 6 && minor == 1:
-		return "Windows Server 2008 R2"
-	default:
-		return "Windows"
+func readWindowsProductName() string {
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows NT\CurrentVersion`, registry.QUERY_VALUE)
+	if err != nil {
+		return ""
 	}
+	defer key.Close()
+	value, _, err := key.GetStringValue("ProductName")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(value)
 }
 
 func readUptimeSeconds() uint64 {

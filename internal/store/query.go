@@ -106,14 +106,42 @@ type MemoryHardware struct {
 }
 
 type BlockDeviceHardware struct {
-	DeviceName   string `json:"device_name"`
-	DeviceKind   string `json:"device_kind"`
-	Vendor       string `json:"vendor,omitempty"`
-	ModelName    string `json:"model_name,omitempty"`
-	SerialNumber string `json:"serial_number,omitempty"`
-	WWN          string `json:"wwn,omitempty"`
-	SizeBytes    int64  `json:"size_bytes"`
-	Rotational   *bool  `json:"rotational,omitempty"`
+	DeviceName              string     `json:"device_name"`
+	DeviceKind              string     `json:"device_kind"`
+	Vendor                  string     `json:"vendor,omitempty"`
+	ModelName               string     `json:"model_name,omitempty"`
+	SerialNumber            string     `json:"serial_number,omitempty"`
+	WWN                     string     `json:"wwn,omitempty"`
+	SizeBytes               int64      `json:"size_bytes"`
+	Rotational              *bool      `json:"rotational,omitempty"`
+	Protocol                string     `json:"protocol,omitempty"`
+	SMARTDeviceType         string     `json:"smart_device_type,omitempty"`
+	RAIDPassthrough         bool       `json:"raid_passthrough"`
+	HealthCollectedAt       *time.Time `json:"health_collected_at,omitempty"`
+	SMARTAvailable          bool       `json:"smart_available"`
+	SMARTEnabled            bool       `json:"smart_enabled"`
+	SMARTStatus             string     `json:"smart_status,omitempty"`
+	RiskLevel               string     `json:"risk_level,omitempty"`
+	RiskReasons             []string   `json:"risk_reasons,omitempty"`
+	TemperatureCelsius      *float64   `json:"temperature_celsius,omitempty"`
+	PowerOnHours            *int64     `json:"power_on_hours,omitempty"`
+	ErrorCount              *int64     `json:"error_count,omitempty"`
+	ReadErrorRateNormalized *int64     `json:"read_error_rate_normalized,omitempty"`
+	ReadErrorRateRaw        *int64     `json:"read_error_rate_raw,omitempty"`
+	ReallocatedSectors      *int64     `json:"reallocated_sectors,omitempty"`
+	PendingSectors          *int64     `json:"pending_sectors,omitempty"`
+	UncorrectableSectors    *int64     `json:"uncorrectable_sectors,omitempty"`
+	PercentageUsed          *float64   `json:"percentage_used,omitempty"`
+}
+
+type TemperatureStatus struct {
+	Key                string    `json:"key"`
+	Component          string    `json:"component"`
+	Label              string    `json:"label"`
+	BucketAt           time.Time `json:"bucket_at"`
+	TemperatureCelsius float64   `json:"temperature_celsius"`
+	HighCelsius        *float64  `json:"high_celsius,omitempty"`
+	CriticalCelsius    *float64  `json:"critical_celsius,omitempty"`
 }
 
 type GPUStatus struct {
@@ -133,6 +161,7 @@ type NodeDetail struct {
 	CPUPackages   []CPUHardware         `json:"cpu_packages"`
 	MemoryModules []MemoryHardware      `json:"memory_modules"`
 	BlockDevices  []BlockDeviceHardware `json:"block_devices"`
+	Temperatures  []TemperatureStatus   `json:"temperatures"`
 	GPUs          []GPUStatus           `json:"gpus"`
 	Filesystems   []FilesystemStatus    `json:"filesystems"`
 	Network       []NetworkStatus       `json:"network"`
@@ -224,9 +253,13 @@ func (store *Store) GetNode(ctx context.Context, nodeID string) (NodeDetail, err
 	if err != nil {
 		return NodeDetail{}, err
 	}
+	temperatures, err := store.listTemperatures(ctx, nodeID)
+	if err != nil {
+		return NodeDetail{}, err
+	}
 	return NodeDetail{
 		Node: summary, CPUPackages: cpuPackages, MemoryModules: memoryModules,
-		BlockDevices: blockDevices, GPUs: gpus, Filesystems: filesystems, Network: network,
+		BlockDevices: blockDevices, Temperatures: temperatures, GPUs: gpus, Filesystems: filesystems, Network: network,
 	}, nil
 }
 
@@ -510,13 +543,7 @@ func (store *Store) listMemoryModules(ctx context.Context, nodeID string) ([]Mem
 }
 
 func (store *Store) listBlockDevices(ctx context.Context, nodeID string) ([]BlockDeviceHardware, error) {
-	rows, err := store.pool.Query(ctx, `
-		SELECT device_name, device_kind, COALESCE(vendor, ''), COALESCE(model_name, ''),
-		       COALESCE(serial_number, ''), COALESCE(wwn, ''), size_bytes, rotational
-		  FROM monitoring.block_devices
-		 WHERE node_id = $1::uuid AND removed_at IS NULL
-		 ORDER BY device_name
-	`, nodeID)
+	rows, err := store.pool.Query(ctx, blockDeviceDetailSQL, nodeID)
 	if err != nil {
 		return nil, fmt.Errorf("query block devices: %w", err)
 	}
@@ -524,13 +551,70 @@ func (store *Store) listBlockDevices(ctx context.Context, nodeID string) ([]Bloc
 	result := make([]BlockDeviceHardware, 0)
 	for rows.Next() {
 		var item BlockDeviceHardware
-		if err := rows.Scan(&item.DeviceName, &item.DeviceKind, &item.Vendor, &item.ModelName, &item.SerialNumber, &item.WWN, &item.SizeBytes, &item.Rotational); err != nil {
+		if err := rows.Scan(
+			&item.DeviceName, &item.DeviceKind, &item.Vendor, &item.ModelName,
+			&item.SerialNumber, &item.WWN, &item.SizeBytes, &item.Rotational,
+			&item.Protocol, &item.SMARTDeviceType, &item.RAIDPassthrough,
+			&item.HealthCollectedAt, &item.SMARTAvailable, &item.SMARTEnabled,
+			&item.SMARTStatus, &item.RiskLevel, &item.RiskReasons, &item.TemperatureCelsius,
+			&item.PowerOnHours, &item.ErrorCount, &item.ReadErrorRateNormalized,
+			&item.ReadErrorRateRaw, &item.ReallocatedSectors, &item.PendingSectors,
+			&item.UncorrectableSectors, &item.PercentageUsed,
+		); err != nil {
 			return nil, fmt.Errorf("scan block device: %w", err)
 		}
 		result = append(result, item)
 	}
 	return result, rows.Err()
 }
+
+const blockDeviceDetailSQL = `
+		SELECT device_name, device_kind, COALESCE(vendor, ''), COALESCE(model_name, ''),
+		       COALESCE(serial_number, ''), COALESCE(wwn, ''), size_bytes, rotational,
+		       COALESCE(device.protocol, ''), COALESCE(device.smart_device_type, ''), device.raid_passthrough,
+		       health.bucket_at, COALESCE(health.smart_available, false), COALESCE(health.smart_enabled, false),
+		       COALESCE(health.smart_status, ''), COALESCE(health.risk_level, ''),
+		       COALESCE(health.risk_reasons, ARRAY[]::text[]), health.temperature_celsius,
+		       health.power_on_hours, health.error_count, health.read_error_rate_normalized,
+		       health.read_error_rate_raw, health.reallocated_sectors, health.pending_sectors,
+		       health.uncorrectable_sectors, health.percentage_used
+		  FROM monitoring.block_devices device
+		  LEFT JOIN monitoring.storage_health_current_metrics health
+		    ON health.node_id = device.node_id AND health.block_device_id = device.id
+		 WHERE device.node_id = $1::uuid AND device.removed_at IS NULL
+		 ORDER BY device.device_name, device.smart_device_type
+`
+
+func (store *Store) listTemperatures(ctx context.Context, nodeID string) ([]TemperatureStatus, error) {
+	rows, err := store.pool.Query(ctx, temperatureDetailSQL, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("query temperatures: %w", err)
+	}
+	defer rows.Close()
+	result := make([]TemperatureStatus, 0)
+	for rows.Next() {
+		var item TemperatureStatus
+		if err := rows.Scan(
+			&item.Key, &item.Component, &item.Label, &item.BucketAt,
+			&item.TemperatureCelsius, &item.HighCelsius, &item.CriticalCelsius,
+		); err != nil {
+			return nil, fmt.Errorf("scan temperature: %w", err)
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+const temperatureDetailSQL = `
+		SELECT sensor_key, component, label, bucket_at, temperature_celsius::double precision,
+		       high_celsius::double precision, critical_celsius::double precision
+		  FROM monitoring.temperature_current_metrics
+		 WHERE node_id = $1::uuid
+		 ORDER BY CASE component
+		              WHEN 'cpu' THEN 1 WHEN 'motherboard' THEN 2 WHEN 'gpu' THEN 3
+		              WHEN 'storage' THEN 4 ELSE 5
+		          END, label, sensor_key
+`
 
 func (store *Store) listGPUs(ctx context.Context, nodeID string) ([]GPUStatus, error) {
 	rows, err := store.pool.Query(ctx, `
@@ -584,6 +668,35 @@ func ValidHistoryRange(value string) bool {
 	return ok
 }
 
+type historyQuerySpec struct {
+	resolution    string
+	nodeQuery     string
+	gpuQuery      string
+	bucketMinutes int
+}
+
+func historyQueries(duration time.Duration) historyQuerySpec {
+	if duration > 24*time.Hour {
+		return historyQuerySpec{
+			resolution: "hour",
+			nodeQuery:  hourlyHistorySQL,
+			gpuQuery:   hourlyGPUHistorySQL,
+		}
+	}
+	bucketMinutes := 1
+	resolution := "minute"
+	if duration == 24*time.Hour {
+		bucketMinutes = 5
+		resolution = "5minute"
+	}
+	return historyQuerySpec{
+		resolution:    resolution,
+		nodeQuery:     rawHistorySQL,
+		gpuQuery:      rawGPUHistorySQL,
+		bucketMinutes: bucketMinutes,
+	}
+}
+
 func (store *Store) GetNodeHistory(ctx context.Context, nodeID, window string) (NodeHistory, error) {
 	duration, ok := historyDurations[window]
 	if !ok {
@@ -598,15 +711,12 @@ func (store *Store) GetNodeHistory(ctx context.Context, nodeID, window string) (
 	}
 
 	start := time.Now().UTC().Add(-duration)
-	resolution := "minute"
-	query := rawHistorySQL
-	gpuQuery := rawGPUHistorySQL
-	if duration > 24*time.Hour {
-		resolution = "hour"
-		query = hourlyHistorySQL
-		gpuQuery = hourlyGPUHistorySQL
+	spec := historyQueries(duration)
+	queryArgs := []any{nodeID, start}
+	if spec.bucketMinutes > 0 {
+		queryArgs = append(queryArgs, spec.bucketMinutes)
 	}
-	rows, err := store.pool.Query(ctx, query, nodeID, start)
+	rows, err := store.pool.Query(ctx, spec.nodeQuery, queryArgs...)
 	if err != nil {
 		return NodeHistory{}, fmt.Errorf("query node history: %w", err)
 	}
@@ -627,18 +737,18 @@ func (store *Store) GetNodeHistory(ctx context.Context, nodeID, window string) (
 		return NodeHistory{}, fmt.Errorf("iterate node history: %w", err)
 	}
 	rows.Close()
-	gpus, err := store.queryGPUHistory(ctx, gpuQuery, nodeID, start)
+	gpus, err := store.queryGPUHistory(ctx, spec.gpuQuery, queryArgs...)
 	if err != nil {
 		return NodeHistory{}, err
 	}
 	return NodeHistory{
-		NodeID: nodeID, Range: window, Resolution: resolution,
+		NodeID: nodeID, Range: window, Resolution: spec.resolution,
 		Points: points, GPUs: gpus,
 	}, nil
 }
 
-func (store *Store) queryGPUHistory(ctx context.Context, query, nodeID string, start time.Time) ([]GPUHistorySeries, error) {
-	rows, err := store.pool.Query(ctx, query, nodeID, start)
+func (store *Store) queryGPUHistory(ctx context.Context, query string, args ...any) ([]GPUHistorySeries, error) {
+	rows, err := store.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query GPU history: %w", err)
 	}
@@ -677,37 +787,76 @@ func (store *Store) queryGPUHistory(ctx context.Context, query, nodeID string, s
 }
 
 const rawHistorySQL = `
-	SELECT sample.bucket_at,
-	       sample.cpu_usage_percent::double precision,
-	       CASE WHEN sample.memory_total_bytes = 0 THEN 0
-	            ELSE sample.memory_used_bytes::double precision * 100 / sample.memory_total_bytes END,
-	       COALESCE(filesystem.used_percent, 0)::double precision,
-	       sample.disk_read_bytes_delta::double precision / sample.interval_seconds,
-	       sample.disk_write_bytes_delta::double precision / sample.interval_seconds,
-	       COALESCE(network.rx_bytes_delta, 0)::double precision / sample.interval_seconds,
-	       COALESCE(network.tx_bytes_delta, 0)::double precision / sample.interval_seconds
-	  FROM monitoring.node_metric_samples sample
-	  LEFT JOIN LATERAL (
-		SELECT max(filesystem_sample.used_percent) AS used_percent
+	WITH filesystem_by_bucket AS (
+		SELECT filesystem_sample.bucket_at,
+		       max(filesystem_sample.used_percent) AS used_percent
 		  FROM monitoring.filesystem_metric_samples filesystem_sample
 		  JOIN monitoring.filesystems filesystem
 		    ON filesystem.node_id = filesystem_sample.node_id
 		   AND filesystem.id = filesystem_sample.filesystem_id
-		 WHERE filesystem_sample.bucket_at = sample.bucket_at
-		   AND filesystem_sample.node_id = sample.node_id
+		 WHERE filesystem_sample.node_id = $1::uuid
+		   AND filesystem_sample.bucket_at >= $2
 		   AND NOT ('ro' = ANY(filesystem.mount_options))
-	  ) filesystem ON true
-	  LEFT JOIN LATERAL (
-		SELECT sum(rx_bytes_delta) AS rx_bytes_delta, sum(tx_bytes_delta) AS tx_bytes_delta
+		 GROUP BY filesystem_sample.bucket_at
+	), network_by_bucket AS (
+		SELECT network_sample.bucket_at,
+		       sum(network_sample.rx_bytes_delta) AS rx_bytes_delta,
+		       sum(network_sample.tx_bytes_delta) AS tx_bytes_delta
 		  FROM monitoring.network_metric_samples network_sample
-		 WHERE network_sample.bucket_at = sample.bucket_at
-		   AND network_sample.node_id = sample.node_id
-	  ) network ON true
-	 WHERE sample.node_id = $1::uuid AND sample.bucket_at >= $2
-	 ORDER BY sample.bucket_at
+		 WHERE network_sample.node_id = $1::uuid
+		   AND network_sample.bucket_at >= $2
+		 GROUP BY network_sample.bucket_at
+	), minute_points AS (
+		SELECT date_trunc('hour', sample.bucket_at)
+		         + ((extract(minute FROM sample.bucket_at)::integer / $3::integer) * $3::integer) * interval '1 minute' AS bucket_at,
+		       sample.cpu_usage_percent::double precision AS cpu_usage_percent,
+		       CASE WHEN sample.memory_total_bytes = 0 THEN 0
+		            ELSE sample.memory_used_bytes::double precision * 100 / sample.memory_total_bytes END AS memory_usage_percent,
+		       COALESCE(filesystem.used_percent, 0)::double precision AS disk_usage_percent,
+		       sample.disk_read_bytes_delta::double precision AS disk_read_bytes_delta,
+		       sample.disk_write_bytes_delta::double precision AS disk_write_bytes_delta,
+		       COALESCE(network.rx_bytes_delta, 0)::double precision AS network_rx_bytes_delta,
+		       COALESCE(network.tx_bytes_delta, 0)::double precision AS network_tx_bytes_delta,
+		       sample.interval_seconds::double precision AS interval_seconds
+		  FROM monitoring.node_metric_samples sample
+		  LEFT JOIN filesystem_by_bucket filesystem ON filesystem.bucket_at = sample.bucket_at
+		  LEFT JOIN network_by_bucket network ON network.bucket_at = sample.bucket_at
+		 WHERE sample.node_id = $1::uuid AND sample.bucket_at >= $2
+	)
+	SELECT bucket_at,
+	       avg(cpu_usage_percent)::double precision,
+	       avg(memory_usage_percent)::double precision,
+	       avg(disk_usage_percent)::double precision,
+	       sum(disk_read_bytes_delta)::double precision / NULLIF(sum(interval_seconds), 0),
+	       sum(disk_write_bytes_delta)::double precision / NULLIF(sum(interval_seconds), 0),
+	       sum(network_rx_bytes_delta)::double precision / NULLIF(sum(interval_seconds), 0),
+	       sum(network_tx_bytes_delta)::double precision / NULLIF(sum(interval_seconds), 0)
+	  FROM minute_points
+	 GROUP BY bucket_at
+	 ORDER BY bucket_at
 `
 
 const hourlyHistorySQL = `
+	WITH filesystem_by_hour AS (
+		SELECT filesystem_sample.hour_at,
+		       max(filesystem_sample.usage_avg) AS used_percent
+		  FROM monitoring.filesystem_metric_hourly filesystem_sample
+		  JOIN monitoring.filesystems filesystem
+		    ON filesystem.node_id = filesystem_sample.node_id
+		   AND filesystem.id = filesystem_sample.filesystem_id
+		 WHERE filesystem_sample.node_id = $1::uuid
+		   AND filesystem_sample.hour_at >= $2
+		   AND NOT ('ro' = ANY(filesystem.mount_options))
+		 GROUP BY filesystem_sample.hour_at
+	), network_by_hour AS (
+		SELECT network_sample.hour_at,
+		       sum(network_sample.rx_bits_per_second_avg) / 8 AS rx_bytes_per_second,
+		       sum(network_sample.tx_bits_per_second_avg) / 8 AS tx_bytes_per_second
+		  FROM monitoring.network_metric_hourly network_sample
+		 WHERE network_sample.node_id = $1::uuid
+		   AND network_sample.hour_at >= $2
+		 GROUP BY network_sample.hour_at
+	)
 	SELECT sample.hour_at,
 	       sample.cpu_usage_avg::double precision,
 	       sample.memory_usage_avg::double precision,
@@ -717,37 +866,30 @@ const hourlyHistorySQL = `
 	       COALESCE(network.rx_bytes_per_second, 0)::double precision,
 	       COALESCE(network.tx_bytes_per_second, 0)::double precision
 	  FROM monitoring.node_metric_hourly sample
-	  LEFT JOIN LATERAL (
-		SELECT max(filesystem_sample.usage_avg) AS used_percent
-		  FROM monitoring.filesystem_metric_hourly filesystem_sample
-		  JOIN monitoring.filesystems filesystem
-		    ON filesystem.node_id = filesystem_sample.node_id
-		   AND filesystem.id = filesystem_sample.filesystem_id
-		 WHERE filesystem_sample.hour_at = sample.hour_at
-		   AND filesystem_sample.node_id = sample.node_id
-		   AND NOT ('ro' = ANY(filesystem.mount_options))
-	  ) filesystem ON true
-	  LEFT JOIN LATERAL (
-		SELECT sum(rx_bits_per_second_avg) / 8 AS rx_bytes_per_second,
-		       sum(tx_bits_per_second_avg) / 8 AS tx_bytes_per_second
-		  FROM monitoring.network_metric_hourly network_sample
-		 WHERE network_sample.hour_at = sample.hour_at
-		   AND network_sample.node_id = sample.node_id
-	  ) network ON true
+	  LEFT JOIN filesystem_by_hour filesystem ON filesystem.hour_at = sample.hour_at
+	  LEFT JOIN network_by_hour network ON network.hour_at = sample.hour_at
 	 WHERE sample.node_id = $1::uuid AND sample.hour_at >= $2
 	 ORDER BY sample.hour_at
 `
 
 const rawGPUHistorySQL = `
-	SELECT gpu.id::text, gpu.device_index, gpu.gpu_uuid, gpu.model_name,
-	       sample.bucket_at,
-	       sample.utilization_percent::double precision,
-	       sample.memory_usage_percent::double precision
-	  FROM monitoring.gpu_metric_samples sample
-	  JOIN monitoring.gpu_devices gpu
-	    ON gpu.node_id = sample.node_id AND gpu.id = sample.gpu_id
-	 WHERE sample.node_id = $1::uuid AND sample.bucket_at >= $2
-	 ORDER BY gpu.device_index, gpu.gpu_uuid, sample.bucket_at
+	WITH gpu_points AS (
+		SELECT gpu.id, gpu.device_index, gpu.gpu_uuid, gpu.model_name,
+		       date_trunc('hour', sample.bucket_at)
+		         + ((extract(minute FROM sample.bucket_at)::integer / $3::integer) * $3::integer) * interval '1 minute' AS bucket_at,
+		       sample.utilization_percent,
+		       sample.memory_usage_percent
+		  FROM monitoring.gpu_metric_samples sample
+		  JOIN monitoring.gpu_devices gpu
+		    ON gpu.node_id = sample.node_id AND gpu.id = sample.gpu_id
+		 WHERE sample.node_id = $1::uuid AND sample.bucket_at >= $2
+	)
+	SELECT id::text, device_index, gpu_uuid, model_name, bucket_at,
+	       avg(utilization_percent)::double precision,
+	       avg(memory_usage_percent)::double precision
+	  FROM gpu_points
+	 GROUP BY id, device_index, gpu_uuid, model_name, bucket_at
+	 ORDER BY device_index, gpu_uuid, bucket_at
 `
 
 const hourlyGPUHistorySQL = `

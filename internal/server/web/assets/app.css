@@ -259,6 +259,20 @@ button { color: inherit; }
 .data-table th { background: var(--surface-subtle); color: var(--muted); font-size: 10px; font-weight: 650; text-transform: uppercase; }
 .data-table td { color: var(--table-text); }
 .data-table code { font-size: 11px; }
+.table-subline, .risk-reasons, .counter-line { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 15px; white-space: normal; }
+.risk-reasons { max-width: 230px; color: var(--amber); }
+.counter-line { margin-top: 1px; color: var(--table-text); }
+.temperature-value { color: var(--ink); }
+.temperature-value.healthy { color: var(--green); }
+.temperature-value.warning { color: var(--amber); }
+.temperature-value.critical { color: var(--red); }
+.health-badge, .access-badge { display: inline-flex; align-items: center; min-height: 20px; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 650; }
+.health-badge.healthy { background: var(--green-soft); color: var(--green); }
+.health-badge.warning { background: color-mix(in srgb, var(--amber) 14%, transparent); color: var(--amber); }
+.health-badge.critical { background: var(--error-bg); color: var(--red); }
+.health-badge.unknown, .access-badge { background: var(--tag-bg); color: var(--tag-text); }
+.storage-health-section .data-table { min-width: 1120px; }
+.storage-access .access-badge { margin-right: 6px; }
 .gpu-section .data-table { min-width: 660px; }
 .gpu-section .data-table th:nth-child(1) { width: 36%; }
 .gpu-section .data-table th:nth-child(2), .gpu-section .data-table th:nth-child(3) { width: 20%; }

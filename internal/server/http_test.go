@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,6 +32,10 @@ type fakeStore struct {
 	tagNodeID                   string
 	tags                        []string
 	tagUpdateErr                error
+	history                     store.NodeHistory
+	historyErr                  error
+	historyCalls                atomic.Int32
+	historyDelay                time.Duration
 }
 
 func (fake *fakeStore) Ready(context.Context) error { return nil }
@@ -64,8 +70,22 @@ func (fake *fakeStore) UpdateNodeTags(_ context.Context, nodeID string, tags []s
 	fake.tags = append([]string(nil), tags...)
 	return fake.tagUpdateErr
 }
-func (fake *fakeStore) GetNodeHistory(context.Context, string, string) (store.NodeHistory, error) {
-	return store.NodeHistory{}, store.ErrNotFound
+func (fake *fakeStore) GetNodeHistory(ctx context.Context, _, _ string) (store.NodeHistory, error) {
+	fake.historyCalls.Add(1)
+	if fake.historyDelay > 0 {
+		select {
+		case <-ctx.Done():
+			return store.NodeHistory{}, ctx.Err()
+		case <-time.After(fake.historyDelay):
+		}
+	}
+	if fake.historyErr != nil {
+		return store.NodeHistory{}, fake.historyErr
+	}
+	if fake.history.NodeID == "" {
+		return store.NodeHistory{}, store.ErrNotFound
+	}
+	return fake.history, nil
 }
 
 func TestHealth(t *testing.T) {
@@ -259,6 +279,22 @@ func TestWebDashboardIsServed(t *testing.T) {
 	if contentType := response.Header().Get("Content-Type"); contentType != "text/html; charset=utf-8" {
 		t.Fatalf("unexpected dashboard content type: %s", contentType)
 	}
+	if !bytes.Contains(response.Body.Bytes(), []byte(`/assets/favicon.ico`)) {
+		t.Fatal("dashboard does not reference the favicon")
+	}
+}
+
+func TestFaviconIsServed(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/assets/favicon.ico", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected favicon to return 200, got %d", response.Code)
+	}
+	if !bytes.HasPrefix(response.Body.Bytes(), []byte{0, 0, 1, 0, 3, 0}) {
+		t.Fatal("favicon does not contain the expected three-image ICO header")
+	}
 }
 
 func TestNVIDIAIconIsServed(t *testing.T) {
@@ -337,8 +373,8 @@ func TestWebUIIncludesWindowsAgentUpgradeCommand(t *testing.T) {
 	for path, expected := range map[string][]string{
 		"/": {"agent-update-dialog", "copy-agent-update-command"},
 		"/assets/app.js": {
-			"data-agent-upgrade", "server-status-agent-upgrade.exe", ".\\\\${filename} upgrade",
-			`if exist "%CD%\\${filename}" del /q`,
+			"data-agent-upgrade", "server-status-agent-upgrade.exe", "Get-Variable -Name LASTEXITCODE",
+			"System.IO.File]::Delete", "Windows Agent upgrade failed",
 			"powershell.exe -NoLogo -NoProfile -NonInteractive", "System.Net.WebClient",
 			"System.Environment]::CurrentDirectory",
 		},
@@ -360,6 +396,58 @@ func TestWebUIIncludesWindowsAgentUpgradeCommand(t *testing.T) {
 	}
 }
 
+func TestWebUIBuildsAtomicWindowsCommands(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /assets/app.js returned %d", response.Code)
+	}
+
+	script := response.Body.String()
+	blocks := map[string][2]string{
+		"install": {`if (platform.startsWith("windows-")) {`, `if (platform === "macos") {`},
+		"upgrade": {"function buildWindowsUpgradeCommand()", "function openAgentUpdateDialog(node)"},
+	}
+	for name, markers := range blocks {
+		start := strings.Index(script, markers[0])
+		if start < 0 {
+			t.Fatalf("Windows %s command start was not found", name)
+		}
+		end := strings.Index(script[start:], markers[1])
+		if end < 0 {
+			t.Fatalf("Windows %s command end was not found", name)
+		}
+		block := script[start : start+end]
+		if strings.Contains(block, `.join("\r\n")`) {
+			t.Errorf("Windows %s command must not contain multiple pasted lines", name)
+		}
+		if !strings.Contains(block, "buildWindowsPowerShellCommand(") {
+			t.Errorf("Windows %s command must use one PowerShell invocation", name)
+		}
+	}
+}
+
+func TestWebUILoadsNodeDetailBeforeHistory(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /assets/app.js returned %d", response.Code)
+	}
+	script := response.Body.String()
+	for _, fragment := range []string{
+		`resolution: "loading"`, "historyResolutionLabel", `if (resolution === "5minute")`,
+		"updateHistoryCharts", "historyRequestSequence",
+	} {
+		if !strings.Contains(script, fragment) {
+			t.Errorf("progressive history loading does not contain %q", fragment)
+		}
+	}
+}
+
 func TestHistoryRangeValidation(t *testing.T) {
 	api, _ := testAPI()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes/10000000-0000-4000-8000-000000000001/history?range=forever", nil)
@@ -367,6 +455,63 @@ func TestHistoryRangeValidation(t *testing.T) {
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("expected invalid range to return 400, got %d", response.Code)
+	}
+}
+
+func TestNodeHistoryResponseIsCompressedCachedAndRevalidated(t *testing.T) {
+	api, database := testAPI()
+	nodeID := "10000000-0000-4000-8000-000000000001"
+	database.history = store.NodeHistory{
+		NodeID: nodeID, Range: "24h", Resolution: "5minute",
+		Points: []store.HistoryPoint{{BucketAt: time.Now().UTC(), CPUUsagePercent: 25}},
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes/"+nodeID+"/history?range=24h", nil)
+	request.Header.Set("Accept-Encoding", "gzip")
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected history response 200, got %d", response.Code)
+	}
+	if response.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatal("history response was not compressed")
+	}
+	if response.Header().Get("X-Server-Status-Cache") != "MISS" {
+		t.Fatal("first history response was not marked as a cache miss")
+	}
+	if !strings.Contains(response.Header().Get("Server-Timing"), "history-db") {
+		t.Fatal("history response does not expose database timing")
+	}
+	compressed, err := gzip.NewReader(bytes.NewReader(response.Body.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(compressed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = compressed.Close()
+	var decoded store.NodeHistory
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Resolution != "5minute" {
+		t.Fatalf("unexpected history resolution %q", decoded.Resolution)
+	}
+
+	etag := response.Header().Get("ETag")
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/nodes/"+nodeID+"/history?range=24h", nil)
+	request.Header.Set("If-None-Match", etag)
+	response = httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusNotModified {
+		t.Fatalf("expected cached history response 304, got %d", response.Code)
+	}
+	if response.Header().Get("X-Server-Status-Cache") != "HIT" {
+		t.Fatal("second history response was not marked as a cache hit")
+	}
+	if calls := database.historyCalls.Load(); calls != 1 {
+		t.Fatalf("expected one history store call, got %d", calls)
 	}
 }
 

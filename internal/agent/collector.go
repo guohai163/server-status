@@ -86,6 +86,10 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 	if err != nil {
 		return report.Report{}, err
 	}
+	storageHealth := []report.StorageHealth(nil)
+	if smartctlPath, lookupErr := exec.LookPath("smartctl"); lookupErr == nil {
+		blockDevices, storageHealth = collectStorageHealth(ctx, smartctlPath, blockDevices)
+	}
 	diskMetrics, err := collector.collectDisk(ctx, blockDevices)
 	if err != nil {
 		return report.Report{}, err
@@ -99,6 +103,16 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 		return report.Report{}, err
 	}
 	gpus, gpuMetrics := collectNVIDIAGPUs(ctx)
+	temperatures := collectHWMONTemperatures("/sys/class/hwmon")
+	for _, metric := range gpuMetrics {
+		if metric.TemperatureCelsius == nil {
+			continue
+		}
+		temperatures = append(temperatures, report.TemperatureMetrics{
+			Key: "nvidia:" + metric.GPUKey, Component: "gpu", Label: "NVIDIA GPU", TemperatureCelsius: *metric.TemperatureCelsius,
+		})
+	}
+	sort.Slice(temperatures, func(i, j int) bool { return temperatures[i].Key < temperatures[j].Key })
 
 	now := time.Now().UTC()
 	collector.mu.Lock()
@@ -158,10 +172,12 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 				SwapUsedBytes:  swapMemory.Used,
 				UptimeSeconds:  hostInfo.Uptime,
 			},
-			Disk:        diskMetrics,
-			Filesystems: filesystemMetrics,
-			Network:     networkMetrics,
-			GPUs:        gpuMetrics,
+			Disk:          diskMetrics,
+			Filesystems:   filesystemMetrics,
+			Network:       networkMetrics,
+			GPUs:          gpuMetrics,
+			Temperatures:  temperatures,
+			StorageHealth: storageHealth,
 		},
 	}
 	report.NormalizeInventory(&payload.Inventory)
@@ -180,7 +196,7 @@ func collectNVIDIAGPUs(ctx context.Context) ([]report.GPU, []report.GPUMetrics) 
 	commandContext, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	output, err := exec.CommandContext(commandContext, path,
-		"--query-gpu=uuid,name,index,utilization.gpu,memory.used,memory.total",
+		"--query-gpu=uuid,name,index,utilization.gpu,memory.used,memory.total,temperature.gpu",
 		"--format=csv,noheader,nounits").Output()
 	if err != nil {
 		return nil, nil
@@ -202,7 +218,7 @@ func parseNVIDIASMI(output string) ([]report.GPU, []report.GPUMetrics) {
 	}
 	samples := make([]gpuSample, 0, len(rows))
 	for _, row := range rows {
-		if len(row) != 6 {
+		if len(row) != 7 {
 			continue
 		}
 		for index := range row {
@@ -212,13 +228,18 @@ func parseNVIDIASMI(output string) ([]report.GPU, []report.GPUMetrics) {
 		utilization, utilizationErr := strconv.ParseFloat(row[3], 64)
 		memoryUsedMiB, usedErr := strconv.ParseUint(row[4], 10, 64)
 		memoryTotalMiB, totalErr := strconv.ParseUint(row[5], 10, 64)
+		temperature, temperatureErr := strconv.ParseFloat(row[6], 64)
 		if row[0] == "" || row[1] == "" || indexErr != nil || utilizationErr != nil || usedErr != nil || totalErr != nil || memoryTotalMiB == 0 {
 			continue
+		}
+		var temperatureCelsius *float64
+		if temperatureErr == nil && temperature >= -273.15 && temperature <= 1000 {
+			temperatureCelsius = &temperature
 		}
 		const mebibyte = uint64(1024 * 1024)
 		samples = append(samples, gpuSample{
 			inventory: report.GPU{Key: row[0], UUID: row[0], ModelName: row[1], Index: gpuIndex, MemoryTotalBytes: memoryTotalMiB * mebibyte},
-			metric:    report.GPUMetrics{GPUKey: row[0], UtilizationPercent: utilization, MemoryUsedBytes: memoryUsedMiB * mebibyte},
+			metric:    report.GPUMetrics{GPUKey: row[0], UtilizationPercent: utilization, MemoryUsedBytes: memoryUsedMiB * mebibyte, TemperatureCelsius: temperatureCelsius},
 		})
 	}
 	sort.Slice(samples, func(i, j int) bool { return samples[i].inventory.Index < samples[j].inventory.Index })
@@ -264,7 +285,7 @@ func formatSystemModel(productName, productSKU string) string {
 func (collector *Collector) collectDisk(ctx context.Context, devices []report.BlockDevice) (report.DiskMetrics, error) {
 	names := make([]string, 0, len(devices))
 	for _, device := range devices {
-		if device.DeviceKind == "disk" {
+		if device.DeviceKind == "disk" && !device.RAIDPassthrough {
 			names = append(names, filepath.Base(device.DeviceName))
 		}
 	}

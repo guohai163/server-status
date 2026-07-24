@@ -6,6 +6,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/shirou/gopsutil/v4 v4.26.6
 	github.com/xuri/excelize/v2 v2.9.1
+	golang.org/x/sync v0.17.0
 )
 
 require (
@@ -26,7 +27,6 @@ require (
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	golang.org/x/crypto v0.38.0 // indirect
 	golang.org/x/net v0.40.0 // indirect
-	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 )

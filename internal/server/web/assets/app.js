@@ -51,6 +51,7 @@
   let pendingTagNodeID = null;
   let selectedOS = "";
   let selectedTag = "";
+  let historyRequestSequence = 0;
 
   const chartColorVariables = {
     cpu: "--chart-cpu", memory: "--chart-memory", disk: "--chart-disk",
@@ -119,6 +120,15 @@
     const days = Math.floor(value / 86400);
     const hours = Math.floor((value % 86400) / 3600);
     return days > 0 ? `${days} 天 ${hours} 小时` : `${hours} 小时`;
+  }
+  function hasValue(value) { return value !== null && value !== undefined; }
+  function formatTemperature(value) { return hasValue(value) ? `${Number(value).toFixed(1)} °C` : "--"; }
+  function formatPowerOnHours(value) {
+    if (!hasValue(value)) return "--";
+    const hours = Math.max(0, Number(value) || 0);
+    const days = Math.floor(hours / 24);
+    const remainder = Math.floor(hours % 24);
+    return days > 0 ? `${days} 天 ${remainder} 小时` : `${Math.floor(hours)} 小时`;
   }
   function formatLoad(value) { return (Number(value) || 0).toFixed(2); }
   function formatOS(node) {
@@ -329,21 +339,45 @@
   }
 
   async function loadDetail(nodeID) {
+    const requestSequence = ++historyRequestSequence;
     setLoading(true);
-    app.innerHTML = '<div class="loading-state"><span class="spinner"></span><span>正在读取节点详情</span></div>';
-    try {
-      const [detail, history] = await Promise.all([
-        apiFetch(`/api/v1/nodes/${encodeURIComponent(nodeID)}`),
-        apiFetch(`/api/v1/nodes/${encodeURIComponent(nodeID)}/history?range=${selectedRange}`)
-      ]);
-      currentDetail = detail;
-      renderDetail(detail, history);
-      updatedAt.textContent = `更新于 ${formatTime(new Date(), true)}`;
-    } catch (error) {
-      renderError(error, true);
-    } finally {
-      setLoading(false);
+    if (!currentDetail || currentDetail.node.node_id !== nodeID || !app.querySelector(".detail-head")) {
+      app.innerHTML = '<div class="loading-state"><span class="spinner"></span><span>正在读取节点详情</span></div>';
     }
+    const historyResult = apiFetch(`/api/v1/nodes/${encodeURIComponent(nodeID)}/history?range=${selectedRange}`)
+      .then((history) => ({ history }), (error) => ({ error }));
+    try {
+      const detail = await apiFetch(`/api/v1/nodes/${encodeURIComponent(nodeID)}`);
+      if (requestSequence !== historyRequestSequence) return;
+      currentDetail = detail;
+      const previousHistory = currentHistory.node_id === nodeID && currentHistory.range === selectedRange
+        ? currentHistory : { resolution: "loading", points: [], gpus: [] };
+      renderDetail(detail, previousHistory);
+      const historySubtitle = app.querySelector("[data-history-subtitle]");
+      if (historySubtitle) historySubtitle.textContent = historyResolutionLabel("loading");
+      updatedAt.textContent = `更新于 ${formatTime(new Date(), true)}`;
+      setLoading(false);
+
+      const result = await historyResult;
+      if (requestSequence !== historyRequestSequence) return;
+      if (result.error) {
+        const subtitle = app.querySelector("[data-history-subtitle]");
+        if (subtitle) subtitle.textContent = "历史数据读取失败";
+        return;
+      }
+      updateHistoryCharts(result.history);
+    } catch (error) {
+      if (requestSequence === historyRequestSequence) renderError(error, true);
+    } finally {
+      if (requestSequence === historyRequestSequence) setLoading(false);
+    }
+  }
+
+  function historyResolutionLabel(resolution) {
+    if (resolution === "loading") return "正在加载历史数据";
+    if (resolution === "5minute") return "5 分钟汇总";
+    if (resolution === "hour") return "小时汇总";
+    return "分钟原始指标";
   }
 
   function metricTile(label, value, subtext) {
@@ -376,7 +410,9 @@
       ${metricTile("运行时间", formatDuration(node.uptime_seconds), `${escapeHTML(node.os_name)} ${escapeHTML(node.os_version)}`)}
     </div>
     ${gpuSection(detail.gpus)}
-    <section class="section"><div class="section-head"><div><h2>历史数据</h2><p data-history-subtitle>${history.resolution === "hour" ? "小时汇总" : "分钟原始指标"}</p></div><div class="segmented" aria-label="历史时间范围">${rangeButtons}</div></div>
+    ${temperatureSection(detail.temperatures)}
+    ${storageHealthSection(detail.block_devices)}
+    <section class="section"><div class="section-head"><div><h2>历史数据</h2><p data-history-subtitle>${historyResolutionLabel(history.resolution)}</p></div><div class="segmented" aria-label="历史时间范围">${rangeButtons}</div></div>
       <div class="chart-grid">
         ${chartPanel("resource-chart", "资源使用率", [["CPU", chartColorVariables.cpu], ["内存", chartColorVariables.memory], ["磁盘", chartColorVariables.disk]])}
         ${chartPanel("io-chart", "吞吐速率", [["磁盘读", chartColorVariables.read], ["磁盘写", chartColorVariables.write], ["网络收", chartColorVariables.rx], ["网络发", chartColorVariables.tx]])}
@@ -410,14 +446,28 @@
 
   async function changeRange(nodeID, range) {
     if (range === selectedRange) return;
+    const previousRange = selectedRange;
     selectedRange = range;
+    const requestSequence = ++historyRequestSequence;
     app.querySelectorAll("[data-range]").forEach((button) => button.classList.toggle("active", button.dataset.range === range));
+    const subtitle = app.querySelector("[data-history-subtitle]");
+    if (subtitle) subtitle.textContent = historyResolutionLabel("loading");
     try {
       const history = await apiFetch(`/api/v1/nodes/${encodeURIComponent(nodeID)}/history?range=${range}`);
-      const subtitle = app.querySelector("[data-history-subtitle]");
-      if (subtitle) subtitle.textContent = history.resolution === "hour" ? "小时汇总" : "分钟原始指标";
-      renderCharts(history);
-    } catch (error) { renderError(error, true); }
+      if (requestSequence !== historyRequestSequence) return;
+      updateHistoryCharts(history);
+    } catch (error) {
+      if (requestSequence !== historyRequestSequence) return;
+      selectedRange = previousRange;
+      app.querySelectorAll("[data-range]").forEach((button) => button.classList.toggle("active", button.dataset.range === previousRange));
+      if (subtitle) subtitle.textContent = "历史数据读取失败";
+    }
+  }
+
+  function updateHistoryCharts(history) {
+    const subtitle = app.querySelector("[data-history-subtitle]");
+    if (subtitle) subtitle.textContent = historyResolutionLabel(history.resolution);
+    renderCharts(history);
   }
 
   function renderCharts(history) {
@@ -571,7 +621,7 @@
     return table(["插槽", "型号", "容量", "类型 / 速率"], (items || []).map((item) => `<tr><td>${escapeHTML(item.slot_name || "--")}</td><td>${escapeHTML(item.model_name || item.part_number || item.manufacturer || "--")}</td><td>${formatBytes(item.size_bytes)}</td><td>${escapeHTML(item.memory_type || "--")}${item.speed_mts ? ` / ${item.speed_mts} MT/s` : ""}</td></tr>`));
   }
   function blockTable(items) {
-    return table(["设备", "型号", "类型", "容量"], (items || []).map((item) => `<tr><td><code>${escapeHTML(item.device_name)}</code></td><td>${escapeHTML(item.model_name || item.vendor || "--")}</td><td>${escapeHTML(item.device_kind)}</td><td>${formatBytes(item.size_bytes)}</td></tr>`));
+    return table(["设备", "型号 / 序列号", "类型", "容量"], (items || []).map((item) => `<tr><td><code>${escapeHTML(item.device_name)}</code></td><td>${escapeHTML(item.model_name || item.vendor || "--")}<small class="table-subline">${escapeHTML(item.serial_number || item.wwn || "")}</small></td><td>${escapeHTML(item.device_kind)}</td><td>${formatBytes(item.size_bytes)}</td></tr>`));
   }
   function filesystemTable(items) {
     return table(["挂载点", "设备 / 类型", "使用", "容量"], (items || []).map((item) => `<tr><td><code>${escapeHTML(item.mount_point)}</code></td><td>${escapeHTML(item.device_name)} / ${escapeHTML(item.filesystem_type)}</td><td>${formatPercent(item.used_percent)}</td><td>${formatBytes(item.used_bytes)} / ${formatBytes(item.total_bytes)}</td></tr>`));
@@ -584,6 +634,62 @@
     if (!items || !items.length) return "";
     const rows = items.map((item) => `<tr><td><span class="gpu-model"><img class="nvidia-icon" src="/assets/nvidia.svg" alt=""><span><strong>GPU ${item.index}</strong><small>${escapeHTML(item.model_name)}</small></span></span></td><td><span class="gpu-cell-label">GPU 使用率</span>${gpuMeter(item.utilization_percent)}</td><td><span class="gpu-cell-label">显存使用率</span>${gpuMeter(item.memory_usage_percent)}</td><td><span class="gpu-cell-label">显存</span>${formatBytes(item.memory_used_bytes)} / ${formatBytes(item.memory_total_bytes)}</td></tr>`);
     return `<section class="section gpu-section"><div class="section-head"><div><h2>GPU</h2><p>${items.length} 张 NVIDIA GPU 的当前负载</p></div></div>${table(["设备", "GPU 使用率", "显存使用率", "显存"], rows)}</section>`;
+  }
+  function temperatureSection(items) {
+    const componentLabels = { cpu: "CPU", motherboard: "主板", gpu: "GPU", storage: "硬盘", other: "其他" };
+    const rows = (items || []).map((item) => {
+      const overCritical = hasValue(item.critical_celsius) && item.temperature_celsius >= item.critical_celsius;
+      const overHigh = hasValue(item.high_celsius) && item.temperature_celsius >= item.high_celsius;
+      const state = overCritical ? "critical" : overHigh ? "warning" : "healthy";
+      const threshold = [
+        hasValue(item.high_celsius) ? `高温 ${formatTemperature(item.high_celsius)}` : "",
+        hasValue(item.critical_celsius) ? `临界 ${formatTemperature(item.critical_celsius)}` : ""
+      ].filter(Boolean).join(" / ") || "--";
+      return `<tr><td>${escapeHTML(componentLabels[item.component] || componentLabels.other)}</td><td>${escapeHTML(item.label)}</td><td><strong class="temperature-value ${state}">${formatTemperature(item.temperature_celsius)}</strong></td><td>${threshold}</td></tr>`;
+    });
+    return `<section class="section temperature-section"><div class="section-head"><div><h2>温度</h2><p>当前硬件传感器读数</p></div></div>${table(["组件", "传感器", "当前温度", "阈值"], rows)}</section>`;
+  }
+  function healthBadge(level) {
+    const labels = { healthy: "正常", warning: "注意", critical: "高风险", unknown: "未知" };
+    return `<span class="health-badge ${escapeHTML(level || "unknown")}">${labels[level] || labels.unknown}</span>`;
+  }
+  function storageRiskReasons(reasons) {
+    const labels = {
+      smart_failed: "SMART 总体失败", prefail_attribute: "预故障属性越界",
+      nvme_critical_warning: "NVMe 严重警告", pending_sectors: "存在待映射扇区",
+      uncorrectable_sectors: "存在不可校正扇区", reallocated_sectors: "存在重映射扇区",
+      device_errors: "存在介质或设备错误", age_attribute: "寿命属性越界",
+      device_error_log: "设备错误日志非空", self_test_errors: "自检记录失败",
+      wear_exhausted: "寿命已耗尽", wear_high: "剩余寿命偏低"
+    };
+    return (reasons || []).map((reason) => labels[reason] || reason).join("；");
+  }
+  function storageHealthSection(items) {
+    const rows = (items || []).map((item) => {
+      const access = item.raid_passthrough
+        ? `<span class="access-badge">RAID 透传</span><code>${escapeHTML(item.smart_device_type || "")}</code>`
+        : escapeHTML([item.protocol, item.smart_device_type].filter(Boolean).join(" / ") || item.device_kind);
+      let smartDetail = "SMART 未采集";
+      if (item.health_collected_at && !item.smart_available) smartDetail = "SMART 不可用";
+      if (item.health_collected_at && item.smart_available && !item.smart_enabled) smartDetail = "SMART 未启用";
+      if (item.health_collected_at && item.smart_available && item.smart_enabled) {
+        smartDetail = `SMART ${item.smart_status === "passed" ? "通过" : item.smart_status === "failed" ? "失败" : "未知"}`;
+      }
+      const smartStatus = `${healthBadge(item.health_collected_at ? item.risk_level : "unknown")}<small class="table-subline">${smartDetail}</small>`;
+      const reasons = storageRiskReasons(item.risk_reasons);
+      const counters = [
+        hasValue(item.error_count) ? `错误 ${item.error_count}` : "",
+        hasValue(item.reallocated_sectors) ? `重映射 ${item.reallocated_sectors}` : "",
+        hasValue(item.pending_sectors) ? `待映射 ${item.pending_sectors}` : "",
+        hasValue(item.uncorrectable_sectors) ? `不可校正 ${item.uncorrectable_sectors}` : "",
+        hasValue(item.percentage_used) ? `寿命已用 ${Number(item.percentage_used).toFixed(0)}%` : "",
+        hasValue(item.read_error_rate_normalized) ? `读错误率 标准化 ${item.read_error_rate_normalized}${hasValue(item.read_error_rate_raw) ? ` / 原始 ${item.read_error_rate_raw}` : ""}` : ""
+      ].filter(Boolean);
+      return `<tr><td><code>${escapeHTML(item.device_name)}</code><small class="table-subline">${escapeHTML(item.device_kind)}</small></td><td>${escapeHTML(item.model_name || item.vendor || "--")}<small class="table-subline">${escapeHTML(item.serial_number || item.wwn || "")}</small></td><td class="storage-access">${access}</td><td>${formatBytes(item.size_bytes)}</td><td><strong>${formatTemperature(item.temperature_celsius)}</strong></td><td>${formatPowerOnHours(item.power_on_hours)}</td><td>${smartStatus}${reasons ? `<small class="risk-reasons">${escapeHTML(reasons)}</small>` : ""}</td><td>${counters.length ? counters.map((value) => `<small class="counter-line">${escapeHTML(value)}</small>`).join("") : "--"}</td></tr>`;
+    });
+    const passthroughCount = (items || []).filter((item) => item.raid_passthrough).length;
+    const subtitle = passthroughCount > 0 ? `${items.length} 块设备，其中 ${passthroughCount} 块经 RAID 控制器透传` : `${(items || []).length} 块设备`;
+    return `<section class="section storage-health-section"><div class="section-head"><div><h2>存储健康</h2><p>${subtitle}</p></div></div>${table(["设备", "型号 / 序列号", "接入方式", "容量", "温度", "通电时长", "SMART / 风险", "错误与寿命"], rows)}</section>`;
   }
   function networkTable(items) {
     return table(["接口", "地址", "链路", "接收", "发送", "首页 IP"], (items || []).map((item) => {
@@ -736,10 +842,25 @@
     return `'${String(value).replace(/'/g, `'\\''`)}'`;
   }
 
-  function buildWindowsDownloadCommand(downloadURL, filename) {
-    const urlLiteral = `'${String(downloadURL).replace(/'/g, "''")}'`;
-    const filenameLiteral = `'${String(filename).replace(/'/g, "''")}'`;
-    return `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "(New-Object System.Net.WebClient).DownloadFile(${urlLiteral}, [System.IO.Path]::Combine([System.Environment]::CurrentDirectory, ${filenameLiteral}))"`;
+  function powerShellLiteral(value) {
+    return `'${String(value).replace(/'/g, "''")}'`;
+  }
+
+  function windowsAgentPath(filename) {
+    return `[System.IO.Path]::Combine([System.Environment]::CurrentDirectory, ${powerShellLiteral(filename)})`;
+  }
+
+  function buildWindowsDownloadStatement(downloadURL, filename) {
+    return `(New-Object System.Net.WebClient).DownloadFile(${powerShellLiteral(downloadURL)}, ${windowsAgentPath(filename)})`;
+  }
+
+  function buildWindowsProcessStatement(filename, args, failureMessage) {
+    const invoke = `& (${windowsAgentPath(filename)}) ${args.map(powerShellLiteral).join(" ")}`;
+    return `${invoke}; if ((Get-Variable -Name LASTEXITCODE).Value -ne 0) { throw ${powerShellLiteral(failureMessage)} }`;
+  }
+
+  function buildWindowsPowerShellCommand(statements) {
+    return `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "${statements.join("; ")}"`;
   }
 
   function buildInstallCommand(credentials, environment, version, platform) {
@@ -749,17 +870,12 @@
       const release = version ? `v${version.replace(/^v/, "")}` : "latest";
       const asset = `server-status-agent-windows-${architecture}.exe`;
       const downloadURL = `${origin}/agent/releases/${release}/${asset}`;
-      const installArguments = [
-        "install",
-        `--server "${origin}"`,
-        `--id "${credentials.agent_id}"`,
-        `--token "${credentials.token}"`
-      ];
-      if (environment) installArguments.push(`--environment "${environment}"`);
-      return [
-        buildWindowsDownloadCommand(downloadURL, "server-status-agent.exe"),
-        `.\\server-status-agent.exe ${installArguments.join(" ")}`
-      ].join("\r\n");
+      const installArguments = ["install", "--server", origin, "--id", credentials.agent_id, "--token", credentials.token];
+      if (environment) installArguments.push("--environment", environment);
+      return buildWindowsPowerShellCommand([
+        buildWindowsDownloadStatement(downloadURL, "server-status-agent.exe"),
+        buildWindowsProcessStatement("server-status-agent.exe", installArguments, "Windows Agent installation failed")
+      ]);
     }
     if (platform === "macos") {
       const variables = [
@@ -785,12 +901,13 @@
     const asset = "server-status-agent-windows-amd64.exe";
     const filename = "server-status-agent-upgrade.exe";
     const downloadURL = `${location.origin}/agent/releases/latest/${asset}`;
-    return [
-      `cmd.exe /d /c if exist "%CD%\\${filename}" del /q "%CD%\\${filename}"`,
-      buildWindowsDownloadCommand(downloadURL, filename),
-      `.\\${filename} upgrade`,
-      `cmd.exe /d /c del /q "%CD%\\${filename}"`
-    ].join("\r\n");
+    const deleteUpgradeFile = `[System.IO.File]::Delete(${windowsAgentPath(filename)})`;
+    const runUpgrade = buildWindowsProcessStatement(filename, ["upgrade"], "Windows Agent upgrade failed");
+    return buildWindowsPowerShellCommand([
+      deleteUpgradeFile,
+      buildWindowsDownloadStatement(downloadURL, filename),
+      `try { ${runUpgrade} } finally { ${deleteUpgradeFile} }`
+    ]);
   }
 
   function openAgentUpdateDialog(node) {
@@ -961,6 +1078,7 @@
       loadDetail(match[1]);
       refreshTimer = setInterval(() => loadDetail(match[1]), 60000);
     } else {
+      historyRequestSequence += 1;
       loadNodes(false);
       refreshTimer = setInterval(() => loadNodes(true), 30000);
     }

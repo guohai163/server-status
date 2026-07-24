@@ -23,6 +23,7 @@ type API struct {
 	logger             *slog.Logger
 	adminDigest        [32]byte
 	releases           *releaseCache
+	historyResponses   *historyResponseCache
 	latestAgentVersion string
 	mux                *http.ServeMux
 }
@@ -46,6 +47,7 @@ func NewAPI(database dataStore, adminToken string, logger *slog.Logger, releaseC
 		logger:             logger,
 		adminDigest:        sha256.Sum256([]byte(adminToken)),
 		releases:           newReleaseCache(releaseCacheDir, logger),
+		historyResponses:   newHistoryResponseCache(30*time.Second, 256),
 		latestAgentVersion: latestAgentVersion,
 		mux:                http.NewServeMux(),
 	}
@@ -332,7 +334,9 @@ func (api *API) getNodeHistory(response http.ResponseWriter, request *http.Reque
 	}
 	ctx, cancel := contextWithTimeout(request, 15*time.Second)
 	defer cancel()
-	history, err := api.store.GetNodeHistory(ctx, nodeID, window)
+	cached, cacheHit, err := api.historyResponses.get(ctx, nodeID+":"+window, func(loadCtx context.Context) (store.NodeHistory, error) {
+		return api.store.GetNodeHistory(loadCtx, nodeID, window)
+	})
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(response, http.StatusNotFound, "node not found")
 		return
@@ -342,7 +346,7 @@ func (api *API) getNodeHistory(response http.ResponseWriter, request *http.Reque
 		writeError(response, http.StatusInternalServerError, "cannot get node history")
 		return
 	}
-	writeJSON(response, http.StatusOK, history)
+	writeHistoryResponse(response, request, cached, cacheHit)
 }
 
 func (api *API) requireAdmin(next http.HandlerFunc) http.HandlerFunc {

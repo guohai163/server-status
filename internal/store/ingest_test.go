@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNonNilStringsConvertsMissingJSONArraysForPostgres(t *testing.T) {
 	values := nonNilStrings(nil)
@@ -24,5 +27,16 @@ func TestPostgresMACAddressAcceptsOnlySixByteAddresses(t *testing.T) {
 	}
 	if got := postgresMACAddress("not-a-mac"); got != "" {
 		t.Fatalf("expected invalid address to be omitted, got %q", got)
+	}
+}
+
+func TestHardwareHealthFreshnessQueriesRejectOlderSnapshots(t *testing.T) {
+	for name, query := range map[string]string{
+		"temperature": temperatureSnapshotFreshnessSQL,
+		"storage":     storageHealthSnapshotFreshnessSQL,
+	} {
+		if !strings.Contains(query, "bucket_at > $2") || !strings.Contains(query, "NOT EXISTS") {
+			t.Errorf("%s freshness query does not protect newer snapshots", name)
+		}
 	}
 }

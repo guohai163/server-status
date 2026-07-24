@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.15.0 - 2026-07-24
+
+### Added
+- Collect Linux hwmon CPU, motherboard, GPU, and storage temperatures for node details.
+- Collect SMART model, power-on hours, error counters, wear, and risk from direct disks and smartmontools-discovered RAID passthrough members.
+- Persist current hardware health snapshots and show SMART availability instead of assuming missing data is healthy.
+
+### Fixed
+- Run Windows Agent downloads and install or upgrade actions in one PowerShell invocation so a single paste cannot stop after the silent download step.
+- Read the Windows product name from the registry so modern Windows Server releases no longer fall back to a generic label.
+- Preaggregate filesystem and network history instead of running correlated resource aggregates for every timeline point.
+
+### Changed
+- Replace the dashboard favicon with the server status brand icon.
+- Downsample 24-hour node and GPU history to five-minute points while preserving minute points for shorter ranges and hourly rollups for longer ranges.
+- Cache successful history responses for 30 seconds with request coalescing, ETag revalidation, gzip compression, and server timing headers.
+- Render node details before their history request completes so slow charts no longer block current hardware and status data.
+
 ## v0.14.2 - 2026-07-23
 
 ### Fixed

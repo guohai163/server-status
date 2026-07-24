@@ -139,6 +139,46 @@ func TestReportValidationAcceptsMultipleGPUs(t *testing.T) {
 	}
 }
 
+func TestReportValidationAcceptsHardwareHealthMetrics(t *testing.T) {
+	now := time.Now().UTC()
+	payload := validTestReport(t, now)
+	payload.Inventory.BlockDevices = []BlockDevice{{
+		Key: "disk-1", DeviceName: "/dev/bus/0", DeviceKind: "disk", ModelName: "Test Disk",
+		SMARTDeviceType: "megaraid,0", RAIDPassthrough: true, SizeBytes: 1000,
+	}}
+	temperature := 42.5
+	powerOnHours := uint64(1234)
+	errorCount := uint64(2)
+	payload.Metrics.Temperatures = []TemperatureMetrics{{
+		Key: "coretemp:temp1", Component: "cpu", Label: "Package id 0", TemperatureCelsius: 52.5,
+	}}
+	payload.Metrics.StorageHealth = []StorageHealth{{
+		BlockDeviceKey: "disk-1", SMARTAvailable: true, SMARTEnabled: true,
+		SMARTStatus: "passed", RiskLevel: "warning", RiskReasons: []string{"device_errors"},
+		TemperatureCelsius: &temperature, PowerOnHours: &powerOnHours, ErrorCount: &errorCount,
+	}}
+	payload.InventoryFingerprint, _ = InventoryFingerprint(payload.Inventory)
+	if err := payload.Validate(now); err != nil {
+		t.Fatalf("valid hardware health report rejected: %v", err)
+	}
+
+	payload.Metrics.StorageHealth[0].BlockDeviceKey = "missing"
+	if err := payload.Validate(now); err == nil {
+		t.Fatal("storage health metric referencing an unknown disk was accepted")
+	}
+}
+
+func TestReportValidationRejectsInvalidHardwareTemperature(t *testing.T) {
+	now := time.Now().UTC()
+	payload := validTestReport(t, now)
+	payload.Metrics.Temperatures = []TemperatureMetrics{{
+		Key: "broken", Component: "cpu", Label: "CPU", TemperatureCelsius: 1200,
+	}}
+	if err := payload.Validate(now); err == nil {
+		t.Fatal("temperature outside the supported range was accepted")
+	}
+}
+
 func validTestReport(t *testing.T, now time.Time) Report {
 	t.Helper()
 	inventory := Inventory{

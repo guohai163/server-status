@@ -134,14 +134,37 @@ INSERT INTO monitoring.memory_modules (
 INSERT INTO monitoring.block_devices (
     id, node_id, hardware_key, device_name, device_kind, vendor,
     model_name, serial_number, wwn, size_bytes, rotational,
+    protocol, smart_device_type, raid_passthrough,
     first_seen_at, last_seen_at
 ) VALUES
     ('60000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001',
      'disk-sda', '/dev/sda', 'disk', 'Verify Disk', 'VD-1T', 'DISK-A', 'wwn-a',
-     1000000000000, false, CURRENT_TIMESTAMP - INTERVAL '1 day', CURRENT_TIMESTAMP),
+     1000000000000, false, 'ATA', 'sat', false,
+     CURRENT_TIMESTAMP - INTERVAL '1 day', CURRENT_TIMESTAMP),
     ('60000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001',
-     'disk-sdb', '/dev/sdb', 'disk', 'Verify Disk', 'VD-2T', 'DISK-B', 'wwn-b',
-     2000000000000, true, CURRENT_TIMESTAMP - INTERVAL '1 day', CURRENT_TIMESTAMP);
+     'disk-sdb', '/dev/bus/0', 'disk', 'Verify Disk', 'VD-2T', 'DISK-B', 'wwn-b',
+     2000000000000, true, 'SCSI', 'megaraid,1', true,
+     CURRENT_TIMESTAMP - INTERVAL '1 day', CURRENT_TIMESTAMP);
+
+INSERT INTO monitoring.temperature_current_metrics (
+    node_id, sensor_key, component, label, bucket_at, collected_at, received_at,
+    temperature_celsius, high_celsius, critical_celsius
+) VALUES (
+    '10000000-0000-0000-0000-000000000001', 'coretemp:temp1', 'cpu', 'Package id 0',
+    date_trunc('minute', CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+    52.5, 90, 105
+);
+
+INSERT INTO monitoring.storage_health_current_metrics (
+    node_id, block_device_id, bucket_at, collected_at, received_at,
+    smart_available, smart_enabled, smart_status, risk_level, risk_reasons,
+    temperature_celsius, power_on_hours, error_count, reallocated_sectors
+) VALUES (
+    '10000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000002',
+    date_trunc('minute', CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+    true, true, 'passed', 'warning', ARRAY['reallocated_sectors'],
+    38, 24000, 0, 2
+);
 
 INSERT INTO monitoring.filesystems (
     id, node_id, filesystem_key, filesystem_uuid, device_name,
@@ -353,6 +376,29 @@ BEGIN
      WHERE node_id = '10000000-0000-0000-0000-000000000001';
     IF v_count <> 2 THEN
         RAISE EXCEPTION 'hardware history filtering is incorrect: % active modules', v_count;
+    END IF;
+
+    SELECT count(*) INTO v_count
+      FROM monitoring.temperature_current_metrics
+     WHERE node_id = '10000000-0000-0000-0000-000000000001'
+       AND component = 'cpu'
+       AND temperature_celsius = 52.5;
+    IF v_count <> 1 THEN
+        RAISE EXCEPTION 'temperature current metric was not persisted';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+          FROM monitoring.block_devices device
+          JOIN monitoring.storage_health_current_metrics health
+            ON health.node_id = device.node_id AND health.block_device_id = device.id
+         WHERE device.id = '60000000-0000-0000-0000-000000000002'
+           AND device.raid_passthrough
+           AND device.smart_device_type = 'megaraid,1'
+           AND health.risk_level = 'warning'
+           AND health.power_on_hours = 24000
+    ) THEN
+        RAISE EXCEPTION 'RAID passthrough SMART health was not persisted';
     END IF;
 
     SELECT cardinality(addresses) INTO v_count
@@ -590,8 +636,16 @@ BEGIN
     IF NOT has_table_privilege('server_status_writer', 'monitoring.gpu_metric_samples', 'INSERT') THEN
         RAISE EXCEPTION 'writer role lacks INSERT on GPU raw metrics';
     END IF;
+    IF NOT has_table_privilege('server_status_writer', 'monitoring.temperature_current_metrics', 'INSERT') OR
+       NOT has_table_privilege('server_status_writer', 'monitoring.storage_health_current_metrics', 'INSERT') THEN
+        RAISE EXCEPTION 'writer role lacks INSERT on hardware health metrics';
+    END IF;
     IF has_table_privilege('server_status_reader', 'monitoring.gpu_metric_samples', 'INSERT') THEN
         RAISE EXCEPTION 'reader role can modify GPU raw metrics';
+    END IF;
+    IF has_table_privilege('server_status_reader', 'monitoring.temperature_current_metrics', 'INSERT') OR
+       has_table_privilege('server_status_reader', 'monitoring.storage_health_current_metrics', 'INSERT') THEN
+        RAISE EXCEPTION 'reader role can modify hardware health metrics';
     END IF;
     IF has_table_privilege('server_status_reader', 'monitoring.node_network_preferences', 'INSERT') THEN
         RAISE EXCEPTION 'reader role can modify dashboard network preferences';

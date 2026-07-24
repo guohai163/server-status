@@ -35,7 +35,7 @@ make build-macos-agent-release VERSION=0.13.0
 
 ## 安装
 
-部署本版本 Agent 前，中心数据库必须已按顺序执行到 `V008__arm_cpu_core_topology.sql`，并升级中心服务。否则中心无法持久化 Apple Silicon 的 P/E 核心拓扑。
+部署本版本 Agent 前，中心数据库必须已按顺序执行到 `V009__hardware_health_metrics.sql`，并升级中心服务；其中 V008 负责持久化 Apple Silicon 的 P/E 核心拓扑。macOS Agent 当前不采集 V009 新增的 hwmon/SMART 指标。
 
 1. 在中心看板点击“添加节点”。
 2. 目标平台选择“macOS 11 及以上”。

@@ -213,11 +213,96 @@ func validateMetrics(inventory Inventory, metrics Metrics) error {
 		if item.UtilizationPercent < 0 || item.UtilizationPercent > 100 {
 			return fmt.Errorf("GPU metric %q utilization_percent must be between 0 and 100", item.GPUKey)
 		}
+		if item.TemperatureCelsius != nil && !validTemperature(*item.TemperatureCelsius) {
+			return fmt.Errorf("GPU metric %q has invalid temperature", item.GPUKey)
+		}
 		if err := validateUnsignedBigints(item.MemoryUsedBytes); err != nil {
 			return fmt.Errorf("GPU metric %q: %w", item.GPUKey, err)
 		}
 		if item.MemoryUsedBytes > memoryTotal {
 			return fmt.Errorf("GPU metric %q memory usage exceeds its total", item.GPUKey)
+		}
+	}
+	if len(metrics.Temperatures) > 4096 || len(metrics.StorageHealth) > 4096 {
+		return errors.New("metrics contain too many hardware health resources")
+	}
+	if err := uniqueKeys("temperature metric", len(metrics.Temperatures), func(i int) string { return metrics.Temperatures[i].Key }); err != nil {
+		return err
+	}
+	for _, item := range metrics.Temperatures {
+		switch item.Component {
+		case "cpu", "motherboard", "gpu", "storage", "other":
+		default:
+			return fmt.Errorf("temperature metric %q has invalid component %q", item.Key, item.Component)
+		}
+		if strings.TrimSpace(item.Label) == "" || !validTemperature(item.TemperatureCelsius) ||
+			item.HighCelsius != nil && !validTemperature(*item.HighCelsius) ||
+			item.CriticalCelsius != nil && !validTemperature(*item.CriticalCelsius) {
+			return fmt.Errorf("invalid temperature metric %q", item.Key)
+		}
+	}
+	blockDeviceKeys := make(map[string]struct{}, len(inventory.BlockDevices))
+	for _, item := range inventory.BlockDevices {
+		blockDeviceKeys[item.Key] = struct{}{}
+	}
+	if err := uniqueKeys("storage health metric", len(metrics.StorageHealth), func(i int) string { return metrics.StorageHealth[i].BlockDeviceKey }); err != nil {
+		return err
+	}
+	for _, item := range metrics.StorageHealth {
+		if _, ok := blockDeviceKeys[item.BlockDeviceKey]; !ok {
+			return fmt.Errorf("storage health metric references unknown key %q", item.BlockDeviceKey)
+		}
+		switch item.SMARTStatus {
+		case "passed", "failed", "unknown":
+		default:
+			return fmt.Errorf("storage health metric %q has invalid SMART status %q", item.BlockDeviceKey, item.SMARTStatus)
+		}
+		switch item.RiskLevel {
+		case "healthy", "warning", "critical", "unknown":
+		default:
+			return fmt.Errorf("storage health metric %q has invalid risk level %q", item.BlockDeviceKey, item.RiskLevel)
+		}
+		if item.TemperatureCelsius != nil && !validTemperature(*item.TemperatureCelsius) ||
+			item.PercentageUsed != nil && (*item.PercentageUsed < 0 || *item.PercentageUsed > 255) {
+			return fmt.Errorf("invalid storage health metric %q", item.BlockDeviceKey)
+		}
+		if len(item.RiskReasons) > 32 {
+			return fmt.Errorf("storage health metric %q has too many risk reasons", item.BlockDeviceKey)
+		}
+		seenReasons := make(map[string]struct{}, len(item.RiskReasons))
+		for _, reason := range item.RiskReasons {
+			switch reason {
+			case "smart_failed", "prefail_attribute", "nvme_critical_warning", "pending_sectors",
+				"uncorrectable_sectors", "reallocated_sectors", "device_errors", "age_attribute",
+				"device_error_log", "self_test_errors", "wear_exhausted", "wear_high":
+			default:
+				return fmt.Errorf("storage health metric %q has invalid risk reason", item.BlockDeviceKey)
+			}
+			if _, exists := seenReasons[reason]; exists {
+				return fmt.Errorf("storage health metric %q has duplicate risk reason %q", item.BlockDeviceKey, reason)
+			}
+			seenReasons[reason] = struct{}{}
+		}
+		if err := validateOptionalUnsignedBigints(
+			item.PowerOnHours, item.ErrorCount, item.ReadErrorRateNormalized, item.ReadErrorRateRaw,
+			item.ReallocatedSectors, item.PendingSectors, item.UncorrectableSectors,
+		); err != nil {
+			return fmt.Errorf("storage health metric %q: %w", item.BlockDeviceKey, err)
+		}
+	}
+	return nil
+}
+
+func validTemperature(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= -273.15 && value <= 1000
+}
+
+func validateOptionalUnsignedBigints(values ...*uint64) error {
+	for _, value := range values {
+		if value != nil {
+			if err := validateUnsignedBigints(*value); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

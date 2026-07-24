@@ -86,6 +86,10 @@ func (store *Store) Ingest(ctx context.Context, auth NodeAuth, payload report.Re
 	if err != nil {
 		return err
 	}
+	blockDeviceIDs, err := activeBlockDeviceIDs(ctx, tx, auth.NodeID)
+	if err != nil {
+		return err
+	}
 
 	memory := payload.Metrics.Memory
 	cpu := payload.Metrics.CPU
@@ -204,10 +208,101 @@ func (store *Store) Ingest(ctx context.Context, auth NodeAuth, payload report.Re
 			return fmt.Errorf("insert GPU sample %q: %w", metric.GPUKey, err)
 		}
 	}
+	if err := replaceTemperatureMetrics(ctx, tx, auth.NodeID, bucketAt, payload.CollectedAt.UTC(), receivedAt, payload.Metrics.Temperatures); err != nil {
+		return err
+	}
+	if err := replaceStorageHealthMetrics(ctx, tx, auth.NodeID, bucketAt, payload.CollectedAt.UTC(), receivedAt, blockDeviceIDs, payload.Metrics.StorageHealth); err != nil {
+		return err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit report: %w", err)
 	}
 	return nil
+}
+
+func replaceTemperatureMetrics(ctx context.Context, tx pgx.Tx, nodeID string, bucketAt, collectedAt, receivedAt time.Time, metrics []report.TemperatureMetrics) error {
+	replace, err := currentSnapshotCanBeReplaced(ctx, tx, temperatureSnapshotFreshnessSQL, nodeID, bucketAt)
+	if err != nil {
+		return fmt.Errorf("check temperature metric freshness: %w", err)
+	}
+	if !replace {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM monitoring.temperature_current_metrics WHERE node_id = $1::uuid`, nodeID); err != nil {
+		return fmt.Errorf("replace temperature metrics: %w", err)
+	}
+	for _, metric := range metrics {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO monitoring.temperature_current_metrics (
+				node_id, sensor_key, component, label, bucket_at, collected_at, received_at,
+				temperature_celsius, high_celsius, critical_celsius
+			) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		`, nodeID, metric.Key, metric.Component, metric.Label, bucketAt, collectedAt, receivedAt,
+			metric.TemperatureCelsius, metric.HighCelsius, metric.CriticalCelsius); err != nil {
+			return fmt.Errorf("insert temperature metric %q: %w", metric.Key, err)
+		}
+	}
+	return nil
+}
+
+func replaceStorageHealthMetrics(ctx context.Context, tx pgx.Tx, nodeID string, bucketAt, collectedAt, receivedAt time.Time, blockDeviceIDs map[string]string, metrics []report.StorageHealth) error {
+	replace, err := currentSnapshotCanBeReplaced(ctx, tx, storageHealthSnapshotFreshnessSQL, nodeID, bucketAt)
+	if err != nil {
+		return fmt.Errorf("check storage health metric freshness: %w", err)
+	}
+	if !replace {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM monitoring.storage_health_current_metrics WHERE node_id = $1::uuid`, nodeID); err != nil {
+		return fmt.Errorf("replace storage health metrics: %w", err)
+	}
+	for _, metric := range metrics {
+		blockDeviceID, ok := blockDeviceIDs[metric.BlockDeviceKey]
+		if !ok {
+			return fmt.Errorf("%w: block device %q", ErrInvalidResource, metric.BlockDeviceKey)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO monitoring.storage_health_current_metrics (
+				node_id, block_device_id, bucket_at, collected_at, received_at,
+				smart_available, smart_enabled, smart_status, risk_level, risk_reasons,
+				temperature_celsius, power_on_hours, error_count,
+				read_error_rate_normalized, read_error_rate_raw,
+				reallocated_sectors, pending_sectors, uncorrectable_sectors, percentage_used
+			) VALUES (
+				$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
+				$11, $12, $13, $14, $15, $16, $17, $18, $19
+			)
+		`, nodeID, blockDeviceID, bucketAt, collectedAt, receivedAt,
+			metric.SMARTAvailable, metric.SMARTEnabled, metric.SMARTStatus, metric.RiskLevel,
+			nonNilStrings(metric.RiskReasons), metric.TemperatureCelsius,
+			nullableI64(metric.PowerOnHours), nullableI64(metric.ErrorCount),
+			nullableI64(metric.ReadErrorRateNormalized), nullableI64(metric.ReadErrorRateRaw),
+			nullableI64(metric.ReallocatedSectors), nullableI64(metric.PendingSectors),
+			nullableI64(metric.UncorrectableSectors), metric.PercentageUsed); err != nil {
+			return fmt.Errorf("insert storage health metric %q: %w", metric.BlockDeviceKey, err)
+		}
+	}
+	return nil
+}
+
+const temperatureSnapshotFreshnessSQL = `
+	SELECT NOT EXISTS (
+		SELECT 1 FROM monitoring.temperature_current_metrics
+		WHERE node_id = $1::uuid AND bucket_at > $2
+	)`
+
+const storageHealthSnapshotFreshnessSQL = `
+	SELECT NOT EXISTS (
+		SELECT 1 FROM monitoring.storage_health_current_metrics
+		WHERE node_id = $1::uuid AND bucket_at > $2
+	)`
+
+func currentSnapshotCanBeReplaced(ctx context.Context, tx pgx.Tx, query, nodeID string, bucketAt time.Time) (bool, error) {
+	var replace bool
+	if err := tx.QueryRow(ctx, query, nodeID, bucketAt).Scan(&replace); err != nil {
+		return false, err
+	}
+	return replace, nil
 }
 
 func syncInventory(ctx context.Context, tx pgx.Tx, nodeID string, inventory report.Inventory, observedAt time.Time) error {
@@ -352,10 +447,12 @@ func syncBlockDevices(ctx context.Context, tx pgx.Tx, nodeID string, items []rep
 			UPDATE monitoring.block_devices SET
 				device_name = $3, device_kind = $4, vendor = NULLIF($5, ''), model_name = NULLIF($6, ''),
 				serial_number = NULLIF($7, ''), wwn = NULLIF($8, ''), size_bytes = $9,
-				rotational = $10, last_seen_at = $11
+				rotational = $10, protocol = NULLIF($11, ''), smart_device_type = NULLIF($12, ''),
+				raid_passthrough = $13, last_seen_at = $14
 			WHERE node_id = $1::uuid AND hardware_key = $2 AND removed_at IS NULL
 		`, nodeID, item.Key, item.DeviceName, item.DeviceKind, item.Vendor, item.ModelName,
-			item.SerialNumber, item.WWN, i64(item.SizeBytes), item.Rotational, at)
+			item.SerialNumber, item.WWN, i64(item.SizeBytes), item.Rotational, item.Protocol,
+			item.SMARTDeviceType, item.RAIDPassthrough, at)
 		if err != nil {
 			return fmt.Errorf("update block device %q: %w", item.Key, err)
 		}
@@ -363,13 +460,16 @@ func syncBlockDevices(ctx context.Context, tx pgx.Tx, nodeID string, items []rep
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO monitoring.block_devices (
 					node_id, hardware_key, device_name, device_kind, vendor, model_name,
-					serial_number, wwn, size_bytes, rotational, first_seen_at, last_seen_at
+					serial_number, wwn, size_bytes, rotational, protocol, smart_device_type,
+					raid_passthrough, first_seen_at, last_seen_at
 				) VALUES (
 					$1::uuid, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''),
-					NULLIF($7, ''), NULLIF($8, ''), $9, $10, $11, $11
+					NULLIF($7, ''), NULLIF($8, ''), $9, $10, NULLIF($11, ''), NULLIF($12, ''),
+					$13, $14, $14
 				)
 			`, nodeID, item.Key, item.DeviceName, item.DeviceKind, item.Vendor, item.ModelName,
-				item.SerialNumber, item.WWN, i64(item.SizeBytes), item.Rotational, at); err != nil {
+				item.SerialNumber, item.WWN, i64(item.SizeBytes), item.Rotational, item.Protocol,
+				item.SMARTDeviceType, item.RAIDPassthrough, at); err != nil {
 				return fmt.Errorf("insert block device %q: %w", item.Key, err)
 			}
 		}
@@ -533,6 +633,26 @@ func activeInterfaceIDs(ctx context.Context, tx pgx.Tx, nodeID string) (map[stri
 	return result, rows.Err()
 }
 
+func activeBlockDeviceIDs(ctx context.Context, tx pgx.Tx, nodeID string) (map[string]string, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT hardware_key, id::text FROM monitoring.block_devices
+		WHERE node_id = $1::uuid AND removed_at IS NULL
+	`, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("query active block devices: %w", err)
+	}
+	defer rows.Close()
+	result := make(map[string]string)
+	for rows.Next() {
+		var key, resourceID string
+		if err := rows.Scan(&key, &resourceID); err != nil {
+			return nil, fmt.Errorf("scan active block device: %w", err)
+		}
+		result[key] = resourceID
+	}
+	return result, rows.Err()
+}
+
 type activeGPU struct {
 	ID               string
 	MemoryTotalBytes int64
@@ -564,6 +684,13 @@ func activeGPUIDs(ctx context.Context, tx pgx.Tx, nodeID string) (map[string]act
 
 func i64(value uint64) int64 {
 	return int64(value)
+}
+
+func nullableI64(value *uint64) any {
+	if value == nil {
+		return nil
+	}
+	return int64(*value)
 }
 
 func nonNilStrings(values []string) []string {
