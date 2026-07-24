@@ -24,6 +24,7 @@ fetch_verified() {
   fetch_destination=$3
 
   if [ -f "$fetch_destination" ] && [ "$(sha256_file "$fetch_destination")" = "$fetch_expected" ]; then
+    chmod 0644 "$fetch_destination"
     return
   fi
 
@@ -51,6 +52,7 @@ fetch_verified() {
     exit 1
   fi
   mv -f "$fetch_temporary" "$fetch_destination"
+  chmod 0644 "$fetch_destination"
 }
 
 fetch_verified \

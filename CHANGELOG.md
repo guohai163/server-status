@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.16.1 - 2026-07-24
+
+### Fixed
+- Make bundled smartmontools release assets readable by the unprivileged central server process.
+
 ## v0.16.0 - 2026-07-24
 
 ### Added

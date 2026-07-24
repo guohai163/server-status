@@ -51,6 +51,7 @@ RUN version="${VERSION#v}"; mkdir -p /out; \
       cp /tmp/linux/server-status-agent-* "$release/"; \
       cp /tmp/windows/server-status-* "$release/"; \
       cp /tmp/macos/server-status-agent-* "$release/"; \
+      chmod 0644 "$release"/server-status-smartctl-*; \
       /usr/local/bin/write-release-checksums "$release"; \
       ln -s "v$version" /out/latest; \
     fi

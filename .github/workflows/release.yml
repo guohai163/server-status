@@ -41,7 +41,10 @@ jobs:
           go test ./...
           go vet ./...
       - name: Validate Windows Server 2008 R2 build
-        run: ./scripts/build-release-windows-agent.sh "$GITHUB_REF_NAME" dist/windows-validation
+        run: |
+          ./scripts/build-release-windows-agent.sh "$GITHUB_REF_NAME" dist/windows-validation
+          test "$(stat -c '%a' dist/windows-validation/server-status-smartctl-windows-setup.exe)" = "644"
+          test "$(stat -c '%a' dist/windows-validation/server-status-smartctl-source.tar.gz)" = "644"
 
   validate-macos-agent:
     name: Validate macOS Agent
