@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.16.2 - 2026-07-24
+
+### Fixed
+- Preserve the unquoted NSIS `/D=` argument when extracting smartmontools into the Windows Agent directory under `Program Files`.
+
 ## v0.16.1 - 2026-07-24
 
 ### Fixed

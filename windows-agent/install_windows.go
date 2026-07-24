@@ -123,7 +123,7 @@ func prepareSmartctl(config Config, directory string) (string, error) {
 		return "", fmt.Errorf("remove stale smartctl staging directory: %v", err)
 	}
 	arguments := smartctlInstallerArguments(runtime.GOARCH, staged)
-	output, err := exec.Command(installer, arguments...).CombinedOutput()
+	output, err := smartctlInstallerCommand(installer, arguments).CombinedOutput()
 	if err != nil {
 		_ = os.RemoveAll(staged)
 		return "", fmt.Errorf("extract smartmontools: %v: %s", err, strings.TrimSpace(string(output)))
@@ -135,6 +135,23 @@ func prepareSmartctl(config Config, directory string) (string, error) {
 		return "", fmt.Errorf("smartmontools installer did not produce %s", executable)
 	}
 	return staged, nil
+}
+
+func smartctlInstallerCommand(installer string, arguments []string) *exec.Cmd {
+	command := exec.Command(installer)
+	command.Args = nil
+	commandLine := syscall.EscapeArg(installer)
+	for index, argument := range arguments {
+		commandLine += " "
+		if index == len(arguments)-1 && strings.HasPrefix(argument, "/D=") {
+			// NSIS requires /D=PATH to be the final, unquoted part of the raw command line.
+			commandLine += argument
+			continue
+		}
+		commandLine += syscall.EscapeArg(argument)
+	}
+	command.SysProcAttr = &syscall.SysProcAttr{CmdLine: commandLine}
+	return command
 }
 
 func activateSmartctl(staged, directory string) error {
