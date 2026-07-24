@@ -664,17 +664,22 @@
     };
     return (reasons || []).map((reason) => labels[reason] || reason).join("；");
   }
+  function smartHealthDetail(item) {
+    if (!item.health_collected_at) return "SMART 未采集";
+    if (item.smart_status === "passed" || item.smart_status === "failed") {
+      const passthrough = item.raid_passthrough ? "（RAID 透传）" : "";
+      return `SMART ${item.smart_status === "passed" ? "通过" : "失败"}${passthrough}`;
+    }
+    if (!item.smart_available) return "SMART 不可用";
+    if (!item.smart_enabled) return "SMART 未启用";
+    return "SMART 状态未知";
+  }
   function storageHealthSection(items) {
     const rows = (items || []).map((item) => {
       const access = item.raid_passthrough
         ? `<span class="access-badge">RAID 透传</span><code>${escapeHTML(item.smart_device_type || "")}</code>`
         : escapeHTML([item.protocol, item.smart_device_type].filter(Boolean).join(" / ") || item.device_kind);
-      let smartDetail = "SMART 未采集";
-      if (item.health_collected_at && !item.smart_available) smartDetail = "SMART 不可用";
-      if (item.health_collected_at && item.smart_available && !item.smart_enabled) smartDetail = "SMART 未启用";
-      if (item.health_collected_at && item.smart_available && item.smart_enabled) {
-        smartDetail = `SMART ${item.smart_status === "passed" ? "通过" : item.smart_status === "failed" ? "失败" : "未知"}`;
-      }
+      const smartDetail = smartHealthDetail(item);
       const smartStatus = `${healthBadge(item.health_collected_at ? item.risk_level : "unknown")}<small class="table-subline">${smartDetail}</small>`;
       const reasons = storageRiskReasons(item.risk_reasons);
       const counters = [

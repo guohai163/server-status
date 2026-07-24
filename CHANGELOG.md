@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.15.1 - 2026-07-24
+
+### Fixed
+- Prefer an explicit SMART pass or fail result over a missing availability flag when displaying RAID passthrough health.
+
 ## v0.15.0 - 2026-07-24
 
 ### Added

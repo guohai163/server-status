@@ -448,6 +448,27 @@ func TestWebUILoadsNodeDetailBeforeHistory(t *testing.T) {
 	}
 }
 
+func TestWebUIPrioritizesReportedSMARTStatus(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /assets/app.js returned %d", response.Code)
+	}
+	script := response.Body.String()
+	statusCheck := strings.Index(script, `if (item.smart_status === "passed" || item.smart_status === "failed")`)
+	unavailableCheck := strings.Index(script, `if (!item.smart_available) return "SMART 不可用"`)
+	if statusCheck < 0 || unavailableCheck < 0 || statusCheck > unavailableCheck {
+		t.Fatal("SMART pass/fail status must take precedence over a missing availability flag")
+	}
+	for _, fragment := range []string{`item.raid_passthrough ? "（RAID 透传）" : ""`, `return "SMART 状态未知"`} {
+		if !strings.Contains(script, fragment) {
+			t.Errorf("SMART status messaging does not contain %q", fragment)
+		}
+	}
+}
+
 func TestHistoryRangeValidation(t *testing.T) {
 	api, _ := testAPI()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes/10000000-0000-4000-8000-000000000001/history?range=forever", nil)
