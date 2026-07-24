@@ -95,20 +95,24 @@ func TestReleaseCachePrefersBundledAssetsWithoutUpstream(t *testing.T) {
 	arm64 := []byte("bundled-linux-arm64-agent")
 	windowsAMD64 := []byte("bundled-windows-amd64-agent")
 	macos := []byte("bundled-macos-agent")
+	smartctlSetup := []byte("bundled-smartctl-setup")
+	smartctlSource := []byte("bundled-smartctl-source")
 	checksums := append(releaseChecksums(amd64, arm64), []byte(fmt.Sprintf(
-		"%x  server-status-agent-windows-amd64.exe\n%x  server-status-agent-macos\n",
-		sha256.Sum256(windowsAMD64), sha256.Sum256(macos)))...)
+		"%x  server-status-agent-windows-amd64.exe\n%x  server-status-agent-macos\n%x  server-status-smartctl-windows-setup.exe\n%x  server-status-smartctl-source.tar.gz\n",
+		sha256.Sum256(windowsAMD64), sha256.Sum256(macos), sha256.Sum256(smartctlSetup), sha256.Sum256(smartctlSource)))...)
 	bundledRoot := t.TempDir()
 	releaseDirectory := filepath.Join(bundledRoot, "v1.2.3")
 	if err := os.MkdirAll(releaseDirectory, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	for name, content := range map[string][]byte{
-		"checksums.txt":                         checksums,
-		"server-status-agent-linux-amd64":       amd64,
-		"server-status-agent-linux-arm64":       arm64,
-		"server-status-agent-macos":             macos,
-		"server-status-agent-windows-amd64.exe": windowsAMD64,
+		"checksums.txt":                            checksums,
+		"server-status-agent-linux-amd64":          amd64,
+		"server-status-agent-linux-arm64":          arm64,
+		"server-status-agent-macos":                macos,
+		"server-status-agent-windows-amd64.exe":    windowsAMD64,
+		"server-status-smartctl-windows-setup.exe": smartctlSetup,
+		"server-status-smartctl-source.tar.gz":     smartctlSource,
 	} {
 		if err := os.WriteFile(filepath.Join(releaseDirectory, name), content, 0o644); err != nil {
 			t.Fatal(err)
@@ -128,10 +132,12 @@ func TestReleaseCachePrefersBundledAssetsWithoutUpstream(t *testing.T) {
 	api.releases = cache
 	for _, version := range []string{"v1.2.3", "latest"} {
 		for asset, content := range map[string][]byte{
-			"checksums.txt":                         checksums,
-			"server-status-agent-linux-amd64":       amd64,
-			"server-status-agent-macos":             macos,
-			"server-status-agent-windows-amd64.exe": windowsAMD64,
+			"checksums.txt":                            checksums,
+			"server-status-agent-linux-amd64":          amd64,
+			"server-status-agent-macos":                macos,
+			"server-status-agent-windows-amd64.exe":    windowsAMD64,
+			"server-status-smartctl-windows-setup.exe": smartctlSetup,
+			"server-status-smartctl-source.tar.gz":     smartctlSource,
 		} {
 			response := performRequest(api, "/agent/releases/"+version+"/"+asset)
 			if response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), content) {
@@ -252,6 +258,39 @@ func TestReleaseCacheServesWindowsAgent(t *testing.T) {
 	response := performRequest(api, "/agent/releases/v1.2.3/server-status-agent-windows-386.exe")
 	if response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), windows) {
 		t.Fatalf("unexpected Windows asset response: status=%d body=%q", response.Code, response.Body.Bytes())
+	}
+}
+
+func TestReleaseCacheServesWindowsSmartctlAssets(t *testing.T) {
+	amd64 := []byte("linux-amd64-agent")
+	arm64 := []byte("linux-arm64-agent")
+	setup := []byte("smartctl-windows-setup")
+	source := []byte("smartctl-source")
+	checksums := append(releaseChecksums(amd64, arm64), []byte(fmt.Sprintf(
+		"%x  server-status-smartctl-windows-setup.exe\n%x  server-status-smartctl-source.tar.gz\n",
+		sha256.Sum256(setup), sha256.Sum256(source)))...)
+	cache := testReleaseCache(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/releases/download/v1.2.3/checksums.txt":
+			_, _ = response.Write(checksums)
+		case "/releases/download/v1.2.3/server-status-smartctl-windows-setup.exe":
+			_, _ = response.Write(setup)
+		case "/releases/download/v1.2.3/server-status-smartctl-source.tar.gz":
+			_, _ = response.Write(source)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	api, _ := testAPI()
+	api.releases = cache
+	for asset, content := range map[string][]byte{
+		"server-status-smartctl-windows-setup.exe": setup,
+		"server-status-smartctl-source.tar.gz":     source,
+	} {
+		response := performRequest(api, "/agent/releases/v1.2.3/"+asset)
+		if response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), content) {
+			t.Fatalf("unexpected %s response: status=%d body=%q", asset, response.Code, response.Body.Bytes())
+		}
 	}
 }
 

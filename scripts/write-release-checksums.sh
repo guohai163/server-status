@@ -6,7 +6,7 @@ checksums="$OUTPUT_DIR/checksums.txt"
 temporary="$OUTPUT_DIR/.checksums.txt.new"
 : > "$temporary"
 
-for file in "$OUTPUT_DIR"/server-status-agent-*; do
+for file in "$OUTPUT_DIR"/server-status-agent-* "$OUTPUT_DIR"/server-status-smartctl-*; do
   [ -f "$file" ] || continue
   name=$(basename "$file")
   if command -v sha256sum >/dev/null 2>&1; then

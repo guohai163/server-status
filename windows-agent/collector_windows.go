@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -103,6 +104,13 @@ func (collector *WindowsCollector) Collect(config Config) (Report, error) {
 	}
 	filesystems, filesystemMetrics := collectVolumes()
 	networkInterfaces, networkMetrics, primaryIP := collector.collectNetworkInterfaces()
+	blockDevices := []BlockDevice{}
+	storageHealth := []StorageHealth(nil)
+	if smartctlPath := installedSmartctlPath(); smartctlPath != "" {
+		smartContext, cancelSMART := context.WithTimeout(context.Background(), 25*time.Second)
+		blockDevices, storageHealth = collectStorageHealth(smartContext, smartctlPath, blockDevices)
+		cancelSMART()
+	}
 	logicalProcessors := runtime.NumCPU()
 	if logicalProcessors < 1 {
 		logicalProcessors = 1
@@ -139,7 +147,7 @@ func (collector *WindowsCollector) Collect(config Config) (Report, error) {
 			Key: "system-memory-aggregate", SlotName: "aggregate",
 			ModelName: "System Memory (Windows aggregate)", SizeBytes: memory.TotalPhysical,
 		}},
-		BlockDevices:      []BlockDevice{},
+		BlockDevices:      blockDevices,
 		Filesystems:       filesystems,
 		NetworkInterfaces: networkInterfaces,
 		GPUs:              []GPU{},
@@ -168,7 +176,7 @@ func (collector *WindowsCollector) Collect(config Config) (Report, error) {
 				UptimeSeconds: readUptimeSeconds(),
 			},
 			Disk: DiskMetrics{}, Filesystems: filesystemMetrics,
-			Network: networkMetrics, GPUs: []GPUMetrics{},
+			Network: networkMetrics, GPUs: []GPUMetrics{}, StorageHealth: storageHealth,
 		},
 	}
 	return payload, nil

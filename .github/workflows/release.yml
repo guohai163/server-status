@@ -65,9 +65,44 @@ jobs:
           go test -count=1 ./internal/report
           ./scripts/build-release-macos-agent.sh "$GITHUB_REF_NAME" dist/macos-validation
 
+  validate-windows-agent:
+    name: Validate Windows Agent and smartctl
+    runs-on: windows-2022
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Set up legacy Windows Go toolchain
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: 1.20.14
+          cache-dependency-path: windows-agent/go.sum
+      - name: Test Windows Agent module
+        working-directory: windows-agent
+        run: go test ./...
+      - name: Validate pinned smartmontools installer
+        shell: pwsh
+        run: |
+          $setup = Join-Path $env:RUNNER_TEMP "smartmontools-7.5.win32-setup.exe"
+          $destination = Join-Path $env:RUNNER_TEMP "smartmontools"
+          Invoke-WebRequest -Uri "https://github.com/smartmontools/smartmontools/releases/download/RELEASE_7_5/smartmontools-7.5.win32-setup.exe" -OutFile $setup
+          $expected = "896337fcc253220614cf8cdbd5cf2321c5aa326a37a04160a672a281e6104c70"
+          $actual = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "smartmontools SHA-256 mismatch: $actual" }
+          $arguments = @("/S", "/SO", "smartctl,drivedb,doc,x64", "/D=$destination")
+          $process = Start-Process -FilePath $setup -ArgumentList $arguments -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "smartmontools installer exited with $($process.ExitCode)" }
+          $smartctl = Join-Path $destination "bin\smartctl.exe"
+          if (-not (Test-Path -PathType Leaf $smartctl)) { throw "smartctl.exe was not extracted" }
+          & $smartctl --version
+
   release-agent:
     name: Publish Agent binaries
-    needs: [validate, validate-macos-agent]
+    needs: [validate, validate-macos-agent, validate-windows-agent]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -119,7 +154,7 @@ jobs:
 
   publish-central-image:
     name: Publish central image
-    needs: [validate, validate-macos-agent]
+    needs: [validate, validate-macos-agent, validate-windows-agent]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -203,7 +238,9 @@ jobs:
             server-status-agent-linux-amd64 \
             server-status-agent-linux-arm64 \
             server-status-agent-macos \
-            server-status-agent-windows-amd64.exe; do
+            server-status-agent-windows-amd64.exe \
+            server-status-smartctl-windows-setup.exe \
+            server-status-smartctl-source.tar.gz; do
             if ! grep -Fxq "$expected" <<<"$assets"; then
               echo "missing release asset: $expected" >&2
               exit 1

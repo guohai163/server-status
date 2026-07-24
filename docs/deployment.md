@@ -40,6 +40,8 @@ curl http://10.12.54.200:8080/readyz
 
 Linux 温度通过 `/sys/class/hwmon` 采集。SMART 是可选能力：安装 smartmontools 7.0 及以上后，root Agent 会通过 `smartctl --scan-open --json` 自动发现直连盘和受支持 RAID 控制器后的物理成员盘。缺少工具、SMART 不可用或控制器不支持透传不会使 Agent 上报失败。旧版用户目录 Agent 通常没有读取 SMART/RAID ioctl 的权限，应迁移为当前 root 安装方式后再启用。
 
+Windows Agent 首次安装和执行 `upgrade` 时会从中心 Release 接口自动下载经过校验的 smartmontools 7.5 安装器，只提取 `smartctl`、驱动数据库和许可证文档到 Agent 目录。目标 Windows 节点不访问 GitHub；下载失败时保留已有工具并继续上报非 SMART 指标。
+
 ### 当前旧版节点
 
 - SSH：`gydev@10.12.54.169`
@@ -88,7 +90,7 @@ SERVER_STATUS_CENTRAL_ENV_FILE=/secure/central.env scripts/deploy-central.sh
 
 新节点默认使用中心看板生成的安装命令。留空 Agent 版本时安装最新稳定 Release；填写语义版本时固定下载对应 Release。重复执行同一条命令会原子替换二进制、刷新配置与守护记录并验证首条上报。
 
-正式发布的中心镜像会保存构建它的 Release 版本，并内置同版本的 Linux `amd64/arm64`、Windows `amd64`、macOS Agent 及统一校验文件。`latest` 和镜像固定版本直接从只读内置目录提供，不依赖 GitHub 或运行时缓存；历史版本仍使用持久 Release 缓存。Agent 每次成功上报后，中心比较上报的 `agent_version`；仅当 Agent 版本更低时，响应才携带固定目标版本。支持自更新的 Linux 和 macOS Agent 随后执行：
+正式发布的中心镜像会保存构建它的 Release 版本，并内置同版本的 Linux `amd64/arm64`、Windows `amd64`、macOS Agent、Windows smartmontools 安装器、对应源码及统一校验文件。`latest` 和镜像固定版本直接从只读内置目录提供，不依赖 GitHub 或运行时缓存；历史版本仍使用持久 Release 缓存。Agent 每次成功上报后，中心比较上报的 `agent_version`；仅当 Agent 版本更低时，响应才携带固定目标版本。支持自更新的 Linux 和 macOS Agent 随后执行：
 
 1. 从中心 Release 缓存下载本机架构的固定版本二进制和 `checksums.txt`。
 2. 校验 SHA-256 和临时 Agent 的 `--version`；macOS 还会执行 `zsh` 语法检查。
@@ -114,6 +116,8 @@ SERVER_STATUS_CENTRAL_ENV_FILE=/secure/central.env scripts/deploy-central.sh
 - `server-status-agent-linux-arm64`：Ubuntu/CentOS/RHEL arm64 静态二进制。
 - `server-status-agent-windows-amd64.exe`：Windows Server 2008 R2 及以上兼容 Agent。
 - `server-status-agent-macos`：macOS 11 及以上通用 `zsh` Agent。
+- `server-status-smartctl-windows-setup.exe`：Windows SMART 采集使用的 smartmontools 官方安装器。
+- `server-status-smartctl-source.tar.gz`：对应的 smartmontools 源码。
 - `checksums.txt`：所有 Agent 产物的 SHA-256 校验值。
 
 中心服务镜像发布到 `ghcr.io/guohai163/server-status-central`，支持 `linux/amd64` 和 `linux/arm64`。正式版本可用完整版本号拉取，`latest` 始终指向最后一次稳定 tag 构建。

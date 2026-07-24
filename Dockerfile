@@ -21,7 +21,8 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
 FROM --platform=$BUILDPLATFORM golang:1.20.14-alpine AS build-windows-agent
 WORKDIR /src
 COPY windows-agent ./windows-agent
-COPY scripts/build-release-windows-agent.sh scripts/write-release-checksums.sh ./scripts/
+RUN apk add --no-cache ca-certificates curl
+COPY scripts/build-release-windows-agent.sh scripts/fetch-smartmontools-windows.sh scripts/write-release-checksums.sh ./scripts/
 ARG VERSION
 RUN version="${VERSION#v}"; mkdir -p /out/agent-release; \
     if printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then \
@@ -48,7 +49,7 @@ RUN version="${VERSION#v}"; mkdir -p /out; \
     if printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then \
       release="/out/v$version"; mkdir -p "$release"; \
       cp /tmp/linux/server-status-agent-* "$release/"; \
-      cp /tmp/windows/server-status-agent-* "$release/"; \
+      cp /tmp/windows/server-status-* "$release/"; \
       cp /tmp/macos/server-status-agent-* "$release/"; \
       /usr/local/bin/write-release-checksums "$release"; \
       ln -s "v$version" /out/latest; \

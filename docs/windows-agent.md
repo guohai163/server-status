@@ -17,12 +17,16 @@ Windows Agent 使用独立的 Go Module，并通过 `golang.org/x/sys/windows/sv
 | CPU | `GetSystemTimes` 使用率、处理器标识、逻辑处理器数 |
 | 内存 | `GlobalMemoryStatusEx` 总量、已用、可用、分页文件容量 |
 | 文件系统 | 逻辑卷、文件系统类型、卷序列号、总量、已用、可用 |
+| 物理磁盘 | 型号、序列号、WWN、容量、介质类型和 SMART 访问协议 |
+| 磁盘健康 | SMART 状态、风险、温度、通电时间、错误、坏扇区和 NVMe 磨损 |
 | 网络 | 接口、MAC、MTU、IP、链路状态、速率和 `GetIfTable` 流量增量 |
 | 系统 | 主机名、Windows 版本、Build、架构、运行时间 |
 
 旧版 `GetIfTable` 只提供 32 位原始计数，Agent 会在常驻进程内处理回绕并扩展为 64 位累计值。
 
-第一版不采集物理磁盘型号/SMART、单条内存序列号、磁盘 IOPS 和 GPU。对应 report 字段保持为空或为零，不伪造硬件信息。
+Agent 通过同目录安装的 smartmontools 7.5 执行 `smartctl --scan-open --json`，自动发现直连盘和 smartmontools 支持的 RAID 透传成员盘。逐盘读取使用 `--nocheck=standby`，不会为采集主动唤醒处于待机状态的磁盘。缺少工具、设备不支持 SMART 或控制器/驱动不支持透传时，SMART 数据保持为空，其他指标仍正常上报。
+
+Windows Agent 仍不采集单条内存序列号、磁盘 IOPS 和 GPU，对应 report 字段保持为空或为零，不伪造硬件信息。
 
 ## 发布构建
 
@@ -35,8 +39,10 @@ make build-windows-agent-release VERSION=0.8.0
 发布目录新增：
 
 - `server-status-agent-windows-amd64.exe`
+- `server-status-smartctl-windows-setup.exe`
+- `server-status-smartctl-source.tar.gz`
 
-Release 工作流会先用当前 Go 构建 Linux Agent，再切换到 Go 1.20.14 构建 Windows Agent，并将所有 Agent 二进制写入同一份 `checksums.txt`。
+Release 工作流会先用当前 Go 构建 Linux Agent，再切换到 Go 1.20.14 构建 Windows Agent。Windows 构建从 smartmontools 官方 Release 下载未修改的 7.5 安装器和对应源码，校验仓库锁定的 SHA-256 后写入发布目录。所有 Agent 与 smartmontools 资产共同写入 `checksums.txt`。第三方许可证说明见 [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)。
 
 ## 安装
 
@@ -54,8 +60,11 @@ Release 工作流会先用当前 Go 构建 Linux Agent，再切换到 Go 1.20.14
 
 1. 写入 `%ProgramFiles%\ServerStatus\server-status-agent.exe`。
 2. 写入 `%ProgramFiles%\ServerStatus\agent.json`，并将目录、配置和二进制的 DACL 限制为 LocalSystem 与 Administrators。
-3. 创建自动启动的 `ServerStatusAgent` Windows 服务。
-4. 以 LocalSystem 启动服务。
+3. 从中心 Release 接口下载与 Agent 版本匹配的 smartmontools 安装器，只提取 `smartctl`、驱动数据库和许可证文档到 `%ProgramFiles%\ServerStatus\smartmontools`。
+4. 创建自动启动的 `ServerStatusAgent` Windows 服务。
+5. 以 LocalSystem 启动服务。
+
+smartmontools 下载或提取失败不会阻止 Agent 安装；安装命令会输出警告，Agent 在依赖恢复前继续上报非 SMART 指标。目标 Windows 节点只访问中心服务，不直接访问 GitHub。
 
 Token 会出现在首次安装命令和命令提示符历史中。安装完成后应关闭该窗口；配置文件由 ACL 保护。生产网络应使用支持 TLS 1.2 且证书受旧系统信任的 HTTPS 中心地址，否则 Node Token 会以明文经过网络。
 
@@ -75,13 +84,14 @@ server-status-agent.exe remove --purge
 server-status-agent-upgrade.exe upgrade
 ```
 
-`upgrade` 从现有 `%ProgramFiles%\ServerStatus\agent.json` 读取 Agent ID、Node Token、标签和采集周期，停止服务、替换 EXE 并重新启动，不会重新注册节点或改写凭据。
+`upgrade` 从现有 `%ProgramFiles%\ServerStatus\agent.json` 读取 Agent ID、Node Token、标签和采集周期。新版 Agent 会先从中心下载并暂存匹配版本的 smartmontools，随后停止服务、替换 Agent 和 smartmontools 目录并重新启动，不会重新注册节点或改写凭据。下载或提取失败时保留现有 smartmontools。
 
 配置与日志：
 
 | 内容 | 路径 |
 | --- | --- |
 | 二进制 | `%ProgramFiles%\ServerStatus\server-status-agent.exe` |
+| SMART 工具 | `%ProgramFiles%\ServerStatus\smartmontools\bin\smartctl.exe` |
 | 配置 | `%ProgramFiles%\ServerStatus\agent.json` |
 | 日志 | `%ProgramFiles%\ServerStatus\agent.log` |
 

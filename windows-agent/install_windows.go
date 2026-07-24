@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -57,6 +58,13 @@ func installService(config Config) error {
 	if err := protectPath(configPath); err != nil {
 		return fmt.Errorf("protect config: %v", err)
 	}
+	preparedSmartctl, smartctlErr := prepareSmartctl(config, directory)
+	if smartctlErr != nil {
+		fmt.Fprintf(os.Stderr, "server-status-agent: warning: SMART dependency update failed; keeping the existing smartctl installation: %v\n", smartctlErr)
+	}
+	if preparedSmartctl != "" {
+		defer os.RemoveAll(preparedSmartctl)
+	}
 
 	executable, err := os.Executable()
 	if err != nil {
@@ -76,6 +84,11 @@ func installService(config Config) error {
 	if err := protectPath(target); err != nil {
 		return fmt.Errorf("protect executable: %v", err)
 	}
+	if preparedSmartctl != "" {
+		if err := activateSmartctl(preparedSmartctl, directory); err != nil {
+			fmt.Fprintf(os.Stderr, "server-status-agent: warning: SMART dependency activation failed: %v\n", err)
+		}
+	}
 
 	commandLine := fmt.Sprintf(`"%s" service --config "%s"`, target, configPath)
 	if serviceExists {
@@ -94,6 +107,86 @@ func installService(config Config) error {
 		return fmt.Errorf("start Windows service: %v: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func prepareSmartctl(config Config, directory string) (string, error) {
+	installer, err := downloadReleaseAsset(
+		newReleaseDownloadClient(), config.ServerURL, smartctlReleaseVersion(Version), smartctlReleaseAsset, smartctlReleaseSHA256, directory,
+	)
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(installer)
+
+	staged := filepath.Join(directory, "smartmontools.new")
+	if err := os.RemoveAll(staged); err != nil {
+		return "", fmt.Errorf("remove stale smartctl staging directory: %v", err)
+	}
+	arguments := smartctlInstallerArguments(runtime.GOARCH, staged)
+	output, err := exec.Command(installer, arguments...).CombinedOutput()
+	if err != nil {
+		_ = os.RemoveAll(staged)
+		return "", fmt.Errorf("extract smartmontools: %v: %s", err, strings.TrimSpace(string(output)))
+	}
+	executable := smartctlExecutableIn(staged)
+	info, err := os.Stat(executable)
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		_ = os.RemoveAll(staged)
+		return "", fmt.Errorf("smartmontools installer did not produce %s", executable)
+	}
+	return staged, nil
+}
+
+func activateSmartctl(staged, directory string) error {
+	target := filepath.Join(directory, "smartmontools")
+	backup := filepath.Join(directory, "smartmontools.old")
+	if err := os.RemoveAll(backup); err != nil {
+		return fmt.Errorf("remove stale smartctl backup: %v", err)
+	}
+	hadTarget := false
+	if _, err := os.Stat(target); err == nil {
+		hadTarget = true
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			if err := os.Rename(target, backup); err == nil {
+				break
+			} else if time.Now().After(deadline) {
+				return fmt.Errorf("back up current smartctl installation: %v", err)
+			}
+			time.Sleep(time.Second)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect current smartctl installation: %v", err)
+	}
+	if err := os.Rename(staged, target); err != nil {
+		if hadTarget {
+			_ = os.Rename(backup, target)
+		}
+		return fmt.Errorf("activate smartctl installation: %v", err)
+	}
+	_ = os.RemoveAll(backup)
+	for _, path := range []string{
+		target,
+		smartctlExecutablePath(directory),
+		filepath.Join(target, "bin", "drivedb.h"),
+		filepath.Join(target, "doc", "COPYING.txt"),
+	} {
+		if _, err := os.Stat(path); err == nil {
+			if err := protectPath(path); err != nil {
+				return fmt.Errorf("protect smartctl path %s: %v", path, err)
+			}
+		}
+	}
+	return nil
+}
+
+func installedSmartctlPath() string {
+	path := smartctlExecutablePath(defaultInstallDirectory())
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		return ""
+	}
+	return path
 }
 
 func removeService(purge bool) error {

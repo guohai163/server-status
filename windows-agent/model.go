@@ -59,15 +59,18 @@ type MemoryModule struct {
 }
 
 type BlockDevice struct {
-	Key          string `json:"key"`
-	DeviceName   string `json:"device_name"`
-	DeviceKind   string `json:"device_kind"`
-	Vendor       string `json:"vendor,omitempty"`
-	ModelName    string `json:"model_name,omitempty"`
-	SerialNumber string `json:"serial_number,omitempty"`
-	WWN          string `json:"wwn,omitempty"`
-	SizeBytes    uint64 `json:"size_bytes"`
-	Rotational   *bool  `json:"rotational,omitempty"`
+	Key             string `json:"key"`
+	DeviceName      string `json:"device_name"`
+	DeviceKind      string `json:"device_kind"`
+	Vendor          string `json:"vendor,omitempty"`
+	ModelName       string `json:"model_name,omitempty"`
+	SerialNumber    string `json:"serial_number,omitempty"`
+	WWN             string `json:"wwn,omitempty"`
+	SizeBytes       uint64 `json:"size_bytes"`
+	Rotational      *bool  `json:"rotational,omitempty"`
+	Protocol        string `json:"protocol,omitempty"`
+	SMARTDeviceType string `json:"smart_device_type,omitempty"`
+	RAIDPassthrough bool   `json:"raid_passthrough,omitempty"`
 }
 
 type Filesystem struct {
@@ -102,12 +105,31 @@ type GPU struct {
 }
 
 type Metrics struct {
-	CPU         CPUMetrics          `json:"cpu"`
-	Memory      MemoryMetrics       `json:"memory"`
-	Disk        DiskMetrics         `json:"disk"`
-	Filesystems []FilesystemMetrics `json:"filesystems"`
-	Network     []NetworkMetrics    `json:"network"`
-	GPUs        []GPUMetrics        `json:"gpus,omitempty"`
+	CPU           CPUMetrics          `json:"cpu"`
+	Memory        MemoryMetrics       `json:"memory"`
+	Disk          DiskMetrics         `json:"disk"`
+	Filesystems   []FilesystemMetrics `json:"filesystems"`
+	Network       []NetworkMetrics    `json:"network"`
+	GPUs          []GPUMetrics        `json:"gpus,omitempty"`
+	StorageHealth []StorageHealth     `json:"storage_health,omitempty"`
+}
+
+type StorageHealth struct {
+	BlockDeviceKey          string   `json:"block_device_key"`
+	SMARTAvailable          bool     `json:"smart_available"`
+	SMARTEnabled            bool     `json:"smart_enabled"`
+	SMARTStatus             string   `json:"smart_status"`
+	RiskLevel               string   `json:"risk_level"`
+	RiskReasons             []string `json:"risk_reasons,omitempty"`
+	TemperatureCelsius      *float64 `json:"temperature_celsius,omitempty"`
+	PowerOnHours            *uint64  `json:"power_on_hours,omitempty"`
+	ErrorCount              *uint64  `json:"error_count,omitempty"`
+	ReadErrorRateNormalized *uint64  `json:"read_error_rate_normalized,omitempty"`
+	ReadErrorRateRaw        *uint64  `json:"read_error_rate_raw,omitempty"`
+	ReallocatedSectors      *uint64  `json:"reallocated_sectors,omitempty"`
+	PendingSectors          *uint64  `json:"pending_sectors,omitempty"`
+	UncorrectableSectors    *uint64  `json:"uncorrectable_sectors,omitempty"`
+	PercentageUsed          *float64 `json:"percentage_used,omitempty"`
 }
 
 type CPUMetrics struct {

@@ -45,5 +45,6 @@ for arch in $ARCHES; do
   )
 done
 
+"$ROOT_DIR/scripts/fetch-smartmontools-windows.sh" "$OUTPUT_DIR"
 "$ROOT_DIR/scripts/write-release-checksums.sh" "$OUTPUT_DIR"
 echo "Windows Agent release assets written to $OUTPUT_DIR"

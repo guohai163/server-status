@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.16.0 - 2026-07-24
+
+### Added
+- Collect Windows disk inventory and SMART health through an automatically installed smartmontools 7.5 dependency.
+- Download and atomically refresh smartmontools during both Windows Agent installation and manual Agent upgrades.
+- Publish the verified official smartmontools Windows installer and corresponding source archive with every release.
+
 ## v0.15.1 - 2026-07-24
 
 ### Fixed
