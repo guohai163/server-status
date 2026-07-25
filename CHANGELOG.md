@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.16.3 - 2026-07-25
+
+### Fixed
+- Run the macOS installer download pipeline inside a foreground `sudo` shell so zsh cannot suspend installation while `sudo` accesses the TTY.
+
 ## v0.16.2 - 2026-07-24
 
 ### Fixed

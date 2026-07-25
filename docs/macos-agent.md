@@ -44,13 +44,15 @@ make build-macos-agent-release VERSION=0.13.0
 命令只访问中心节点：
 
 ```bash
-curl -fsSL 'https://中心节点/install-agent-macos.sh' | sudo env \
+sudo env \
   SERVER_STATUS_URL='https://中心节点' \
   SERVER_STATUS_AGENT_ID='节点 Agent ID' \
   SERVER_STATUS_TOKEN='节点 Token' \
   SERVER_STATUS_AGENT_ENVIRONMENT='production' \
-  sh
+  sh -c "curl -fsSL 'https://中心节点/install-agent-macos.sh' | sh"
 ```
+
+`sudo` 在外层 shell 的前台完成管理员授权，下载管道在提权后的 shell 内部运行，避免 zsh 因管道中的 `sudo` 访问 TTY 而挂起安装。
 
 安装器依次下载脚本和 `checksums.txt`、验证 SHA-256、检查 `zsh` 语法、原子写入文件，然后通过 `launchctl bootstrap system` 启动服务并等待第一条报告被中心接受。
 

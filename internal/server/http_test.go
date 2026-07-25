@@ -368,6 +368,40 @@ func TestMacOSAgentInstallerIsServedWithoutCaching(t *testing.T) {
 	}
 }
 
+func TestWebUIRunsMacOSInstallerInsideForegroundSudo(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /assets/app.js returned %d", response.Code)
+	}
+	body := response.Body.String()
+	start := strings.Index(body, `if (platform === "macos") {`)
+	if start < 0 {
+		t.Fatal("macOS install command branch is missing")
+	}
+	macOSBranch := body[start:]
+	end := strings.Index(macOSBranch, "\n    }\n")
+	if end < 0 {
+		t.Fatal("macOS install command branch is incomplete")
+	}
+	macOSBranch = macOSBranch[:end]
+	for _, expected := range []string{
+		`sudo env ${variables.join(" ")}`,
+		`sh -c "curl -fsSL`,
+		`/install-agent-macos.sh`,
+		`| sh"`,
+	} {
+		if !strings.Contains(macOSBranch, expected) {
+			t.Errorf("macOS install command does not contain %q", expected)
+		}
+	}
+	if strings.Contains(macOSBranch, "| sudo env") {
+		t.Error("macOS install command must not place sudo on the right side of a pipeline")
+	}
+}
+
 func TestWebUIIncludesWindowsAgentUpgradeCommand(t *testing.T) {
 	api, _ := testAPI()
 	for path, expected := range map[string][]string{

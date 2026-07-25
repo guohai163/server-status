@@ -890,7 +890,7 @@
       ];
       if (environment) variables.push(`SERVER_STATUS_AGENT_ENVIRONMENT=${shellQuote(environment)}`);
       if (version) variables.push(`SERVER_STATUS_AGENT_VERSION=${shellQuote(version)}`);
-      return `curl -fsSL ${shellQuote(`${origin}/install-agent-macos.sh`)} | sudo env ${variables.join(" ")} sh`;
+      return `sudo env ${variables.join(" ")} sh -c "curl -fsSL ${shellQuote(`${origin}/install-agent-macos.sh`)} | sh"`;
     }
     const variables = [
       `SERVER_STATUS_URL=${shellQuote(origin)}`,
