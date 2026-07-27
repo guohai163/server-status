@@ -273,6 +273,18 @@ button { color: inherit; }
 .health-badge.unknown, .access-badge { background: var(--tag-bg); color: var(--tag-text); }
 .storage-health-section .data-table { min-width: 1120px; }
 .storage-access .access-badge { margin-right: 6px; }
+.raid-controller + .raid-controller { margin-top: 22px; padding-top: 22px; border-top: 1px solid var(--line); }
+.raid-controller-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 14px; }
+.raid-controller-head > div { min-width: 0; }
+.raid-controller-head strong, .raid-controller-head small { display: block; }
+.raid-controller-head strong { color: var(--ink); font-size: 13px; line-height: 20px; }
+.raid-controller-head small { margin-top: 2px; color: var(--muted); font-size: 11px; }
+.raid-table-block + .raid-table-block { margin-top: 14px; }
+.raid-table-block h3 { margin: 0 0 7px; color: var(--muted); font-size: 10px; font-weight: 650; text-transform: uppercase; }
+.raid-table-block .data-table { min-width: 760px; }
+.raid-rebuild { width: 132px; }
+.raid-rebuild strong { display: block; margin-bottom: 5px; color: var(--ink); font-size: 11px; }
+.raid-rebuild small, .raid-progress-pending { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; white-space: normal; }
 .gpu-section .data-table { min-width: 660px; }
 .gpu-section .data-table th:nth-child(1) { width: 36%; }
 .gpu-section .data-table th:nth-child(2), .gpu-section .data-table th:nth-child(3) { width: 20%; }
@@ -367,6 +379,7 @@ button { color: inherit; }
   .metric-tile:nth-child(even) { border-right: 0; }
   .metric-tile:last-child { grid-column: 1 / -1; border-right: 0; }
   .section-head { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .raid-controller-head { align-items: flex-start; flex-direction: column; gap: 8px; }
   .segmented { width: 100%; overflow-x: auto; }
   .range-button { flex: 1 0 43px; }
   .chart-panel { padding: 12px; }

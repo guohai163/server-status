@@ -129,6 +129,9 @@ type StorageHealth struct {
 	ReallocatedSectors      *uint64  `json:"reallocated_sectors,omitempty"`
 	PendingSectors          *uint64  `json:"pending_sectors,omitempty"`
 	UncorrectableSectors    *uint64  `json:"uncorrectable_sectors,omitempty"`
+	SCSIGrownDefects        *uint64  `json:"scsi_grown_defects,omitempty"`
+	SCSIECCCorrected        *uint64  `json:"scsi_ecc_corrected,omitempty"`
+	SCSINonMediumErrors     *uint64  `json:"scsi_non_medium_errors,omitempty"`
 	PercentageUsed          *float64 `json:"percentage_used,omitempty"`
 }
 

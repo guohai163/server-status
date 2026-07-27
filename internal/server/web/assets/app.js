@@ -411,6 +411,7 @@
     </div>
     ${gpuSection(detail.gpus)}
     ${temperatureSection(detail.temperatures)}
+    ${raidSection(detail.raid_controllers)}
     ${storageHealthSection(detail.block_devices)}
     <section class="section"><div class="section-head"><div><h2>历史数据</h2><p data-history-subtitle>${historyResolutionLabel(history.resolution)}</p></div><div class="segmented" aria-label="历史时间范围">${rangeButtons}</div></div>
       <div class="chart-grid">
@@ -653,6 +654,52 @@
     const labels = { healthy: "正常", warning: "注意", critical: "高风险", unknown: "未知" };
     return `<span class="health-badge ${escapeHTML(level || "unknown")}">${labels[level] || labels.unknown}</span>`;
   }
+  function raidStateMeta(state) {
+    const value = String(state || "").trim();
+    const normalized = value.toLowerCase();
+    const labels = {
+      optl: "最佳", optimal: "最佳", onln: "在线", online: "在线",
+      dgrd: "降级", degraded: "降级", pdgd: "部分降级",
+      rbld: "重建中", rebuilding: "重建中", "in progress": "进行中",
+      jbod: "JBOD", ugood: "未配置良好", ghs: "全局热备", dhs: "专用热备",
+      offln: "离线", offline: "离线", ubad: "故障", failed: "故障",
+      msng: "缺失", missing: "缺失", "needs attention": "需要注意"
+    };
+    let level = "unknown";
+    if (["optl", "optimal", "onln", "online", "ghs", "dhs"].includes(normalized)) level = "healthy";
+    if (["dgrd", "degraded", "pdgd", "rbld", "rebuilding", "in progress", "needs attention"].includes(normalized)) level = "warning";
+    if (["offln", "offline", "ubad", "failed", "msng", "missing"].includes(normalized)) level = "critical";
+    return { label: labels[normalized] || value || "未知", level };
+  }
+  function raidStateBadge(state) {
+    const meta = raidStateMeta(state);
+    const code = state && meta.label !== state ? `<small class="table-subline"><code>${escapeHTML(state)}</code></small>` : "";
+    return `<span class="health-badge ${meta.level}">${escapeHTML(meta.label)}</span>${code}`;
+  }
+  function raidRebuildCell(item) {
+    if (hasValue(item.rebuild_progress)) {
+      const progress = clamp(Number(item.rebuild_progress), 0, 100);
+      return `<div class="raid-rebuild"><strong>${progress.toFixed(1)}%</strong><div class="progress"><i class="warning" style="width:${progress}%"></i></div>${item.estimated_time_left ? `<small>${escapeHTML(item.estimated_time_left)}</small>` : ""}</div>`;
+    }
+    const rebuilding = raidStateMeta(item.state).label === "重建中" || String(item.rebuild_status || "").toLowerCase() === "in progress";
+    return rebuilding ? '<span class="raid-progress-pending">等待进度</span>' : "--";
+  }
+  function raidSection(controllers) {
+    if (!controllers || !controllers.length) return "";
+    const virtualDriveCount = controllers.reduce((sum, item) => sum + (item.virtual_drives || []).length, 0);
+    const physicalDriveCount = controllers.reduce((sum, item) => sum + (item.physical_drives || []).length, 0);
+    const contents = controllers.map((controller) => {
+      const virtualRows = (controller.virtual_drives || []).map((item) => `<tr><td><code>${item.drive_group_id}/${item.virtual_drive_id}</code></td><td>${escapeHTML(item.name || item.raid_level)}<small class="table-subline">${escapeHTML(item.raid_level)}</small></td><td>${raidStateBadge(item.state)}</td><td>${escapeHTML(item.access || "--")}<small class="table-subline">一致性 ${escapeHTML(item.consistency || "--")}</small></td><td><code>${escapeHTML(item.cache || "--")}</code></td><td>${formatBytes(item.size_bytes)}</td></tr>`);
+      const physicalRows = (controller.physical_drives || []).map((item) => {
+        const slot = hasValue(item.enclosure_id) ? `${item.enclosure_id}:${item.slot}` : String(item.slot);
+        const driveGroup = hasValue(item.drive_group_id) ? `DG ${item.drive_group_id}` : "未加入磁盘组";
+        const sectorSize = item.sector_size_bytes ? `扇区 ${formatBytes(item.sector_size_bytes)}` : "";
+        return `<tr><td><code>${escapeHTML(slot)}</code><small class="table-subline">DID ${item.device_id}</small></td><td>${escapeHTML(item.model)}<small class="table-subline">${escapeHTML(driveGroup)}</small></td><td>${raidStateBadge(item.state)}</td><td><strong>${escapeHTML(item.interface)}</strong><small class="table-subline">${escapeHTML(item.media_type)}</small></td><td>${formatBytes(item.size_bytes)}${sectorSize ? `<small class="table-subline">${sectorSize}</small>` : ""}</td><td>${raidRebuildCell(item)}</td></tr>`;
+      });
+      return `<div class="raid-controller"><div class="raid-controller-head"><div><strong>控制器 ${controller.controller_id} · ${escapeHTML(controller.model)}</strong><small>${controller.drive_group_count} 个磁盘组 · ${controller.virtual_drive_count} 个虚拟盘 · ${controller.physical_drive_count} 块物理盘</small></div>${raidStateBadge(controller.state)}</div><div class="raid-table-block"><h3>虚拟磁盘</h3>${table(["DG/VD", "名称 / RAID", "状态", "访问 / 一致性", "缓存", "容量"], virtualRows)}</div><div class="raid-table-block"><h3>物理磁盘</h3>${table(["机箱:槽位", "型号 / 磁盘组", "状态", "接口 / 介质", "容量 / 扇区", "重建进度"], physicalRows)}</div></div>`;
+    }).join("");
+    return `<section class="section raid-section"><div class="section-head"><div><h2>RAID 控制器</h2><p>${controllers.length} 张控制器 · ${virtualDriveCount} 个虚拟盘 · ${physicalDriveCount} 块物理盘</p></div></div>${contents}</section>`;
+  }
   function storageRiskReasons(reasons) {
     const labels = {
       smart_failed: "SMART 总体失败", prefail_attribute: "预故障属性越界",
@@ -660,7 +707,10 @@
       uncorrectable_sectors: "存在不可校正扇区", reallocated_sectors: "存在重映射扇区",
       device_errors: "存在介质或设备错误", age_attribute: "寿命属性越界",
       device_error_log: "设备错误日志非空", self_test_errors: "自检记录失败",
-      wear_exhausted: "寿命已耗尽", wear_high: "剩余寿命偏低"
+      wear_exhausted: "寿命已耗尽", wear_high: "剩余寿命偏低",
+      scsi_grown_defects: "SAS 存在新增介质缺陷",
+      scsi_ecc_errors_increased: "本周期 SAS ECC 纠错增加",
+      scsi_non_medium_errors_increased: "本周期 SAS 非介质错误增加"
     };
     return (reasons || []).map((reason) => labels[reason] || reason).join("；");
   }
@@ -682,11 +732,19 @@
       const smartDetail = smartHealthDetail(item);
       const smartStatus = `${healthBadge(item.health_collected_at ? item.risk_level : "unknown")}<small class="table-subline">${smartDetail}</small>`;
       const reasons = storageRiskReasons(item.risk_reasons);
+      const protocol = String(item.protocol || "").toLowerCase();
+      const errorLabel = protocol.includes("scsi") ? "未校正错误" : protocol.includes("nvme") ? "介质错误" : "错误日志";
+      const counterWithDelta = (label, total, delta) => hasValue(total)
+        ? `${label} ${total}${hasValue(delta) ? ` / 本周期 +${delta}` : ""}`
+        : "";
       const counters = [
-        hasValue(item.error_count) ? `错误 ${item.error_count}` : "",
+        hasValue(item.error_count) ? `${errorLabel} ${item.error_count}` : "",
         hasValue(item.reallocated_sectors) ? `重映射 ${item.reallocated_sectors}` : "",
         hasValue(item.pending_sectors) ? `待映射 ${item.pending_sectors}` : "",
         hasValue(item.uncorrectable_sectors) ? `不可校正 ${item.uncorrectable_sectors}` : "",
+        hasValue(item.scsi_grown_defects) ? `SAS grown defect ${item.scsi_grown_defects}` : "",
+        counterWithDelta("SAS ECC 纠错", item.scsi_ecc_corrected, item.scsi_ecc_corrected_delta),
+        counterWithDelta("SAS 非介质错误", item.scsi_non_medium_errors, item.scsi_non_medium_errors_delta),
         hasValue(item.percentage_used) ? `寿命已用 ${Number(item.percentage_used).toFixed(0)}%` : "",
         hasValue(item.read_error_rate_normalized) ? `读错误率 标准化 ${item.read_error_rate_normalized}${hasValue(item.read_error_rate_raw) ? ` / 原始 ${item.read_error_rate_raw}` : ""}` : ""
       ].filter(Boolean);

@@ -118,14 +118,56 @@ type NetworkAddress struct {
 }
 
 type Metrics struct {
-	CPU           CPUMetrics           `json:"cpu"`
-	Memory        MemoryMetrics        `json:"memory"`
-	Disk          DiskMetrics          `json:"disk"`
-	Filesystems   []FilesystemMetrics  `json:"filesystems"`
-	Network       []NetworkMetrics     `json:"network"`
-	GPUs          []GPUMetrics         `json:"gpus,omitempty"`
-	Temperatures  []TemperatureMetrics `json:"temperatures,omitempty"`
-	StorageHealth []StorageHealth      `json:"storage_health,omitempty"`
+	CPU             CPUMetrics             `json:"cpu"`
+	Memory          MemoryMetrics          `json:"memory"`
+	Disk            DiskMetrics            `json:"disk"`
+	Filesystems     []FilesystemMetrics    `json:"filesystems"`
+	Network         []NetworkMetrics       `json:"network"`
+	GPUs            []GPUMetrics           `json:"gpus,omitempty"`
+	Temperatures    []TemperatureMetrics   `json:"temperatures,omitempty"`
+	StorageHealth   []StorageHealth        `json:"storage_health,omitempty"`
+	RAIDControllers []RAIDControllerStatus `json:"raid_controllers,omitempty"`
+}
+
+type RAIDControllerStatus struct {
+	ControllerID       int                       `json:"controller_id"`
+	Model              string                    `json:"model"`
+	State              string                    `json:"state"`
+	PhysicalDriveCount int                       `json:"physical_drive_count"`
+	DriveGroupCount    int                       `json:"drive_group_count"`
+	VirtualDriveCount  int                       `json:"virtual_drive_count"`
+	VirtualDrives      []RAIDVirtualDriveStatus  `json:"virtual_drives"`
+	PhysicalDrives     []RAIDPhysicalDriveStatus `json:"physical_drives"`
+}
+
+type RAIDVirtualDriveStatus struct {
+	DriveGroupID   int    `json:"drive_group_id"`
+	VirtualDriveID int    `json:"virtual_drive_id"`
+	RAIDLevel      string `json:"raid_level"`
+	State          string `json:"state"`
+	Access         string `json:"access,omitempty"`
+	Consistency    string `json:"consistency,omitempty"`
+	Cache          string `json:"cache,omitempty"`
+	SizeBytes      uint64 `json:"size_bytes"`
+	Name           string `json:"name,omitempty"`
+}
+
+type RAIDPhysicalDriveStatus struct {
+	EnclosureID       *int     `json:"enclosure_id,omitempty"`
+	Slot              int      `json:"slot"`
+	DeviceID          int      `json:"device_id"`
+	State             string   `json:"state"`
+	DriveGroupID      *int     `json:"drive_group_id,omitempty"`
+	SizeBytes         uint64   `json:"size_bytes"`
+	Interface         string   `json:"interface"`
+	MediaType         string   `json:"media_type"`
+	SectorSizeBytes   uint64   `json:"sector_size_bytes,omitempty"`
+	Model             string   `json:"model"`
+	Spun              string   `json:"spun,omitempty"`
+	DriveType         string   `json:"drive_type,omitempty"`
+	RebuildProgress   *float64 `json:"rebuild_progress,omitempty"`
+	RebuildStatus     string   `json:"rebuild_status,omitempty"`
+	EstimatedTimeLeft string   `json:"estimated_time_left,omitempty"`
 }
 
 type TemperatureMetrics struct {
@@ -152,6 +194,9 @@ type StorageHealth struct {
 	ReallocatedSectors      *uint64  `json:"reallocated_sectors,omitempty"`
 	PendingSectors          *uint64  `json:"pending_sectors,omitempty"`
 	UncorrectableSectors    *uint64  `json:"uncorrectable_sectors,omitempty"`
+	SCSIGrownDefects        *uint64  `json:"scsi_grown_defects,omitempty"`
+	SCSIECCCorrected        *uint64  `json:"scsi_ecc_corrected,omitempty"`
+	SCSINonMediumErrors     *uint64  `json:"scsi_non_medium_errors,omitempty"`
 	PercentageUsed          *float64 `json:"percentage_used,omitempty"`
 }
 

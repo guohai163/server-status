@@ -149,13 +149,18 @@ func TestReportValidationAcceptsHardwareHealthMetrics(t *testing.T) {
 	temperature := 42.5
 	powerOnHours := uint64(1234)
 	errorCount := uint64(2)
+	scsiGrownDefects := uint64(1)
+	scsiECCCorrected := uint64(14)
+	scsiNonMediumErrors := uint64(41)
 	payload.Metrics.Temperatures = []TemperatureMetrics{{
 		Key: "coretemp:temp1", Component: "cpu", Label: "Package id 0", TemperatureCelsius: 52.5,
 	}}
 	payload.Metrics.StorageHealth = []StorageHealth{{
 		BlockDeviceKey: "disk-1", SMARTAvailable: true, SMARTEnabled: true,
-		SMARTStatus: "passed", RiskLevel: "warning", RiskReasons: []string{"device_errors"},
+		SMARTStatus: "passed", RiskLevel: "warning", RiskReasons: []string{"device_errors", "scsi_grown_defects"},
 		TemperatureCelsius: &temperature, PowerOnHours: &powerOnHours, ErrorCount: &errorCount,
+		SCSIGrownDefects: &scsiGrownDefects, SCSIECCCorrected: &scsiECCCorrected,
+		SCSINonMediumErrors: &scsiNonMediumErrors,
 	}}
 	payload.InventoryFingerprint, _ = InventoryFingerprint(payload.Inventory)
 	if err := payload.Validate(now); err != nil {
@@ -176,6 +181,32 @@ func TestReportValidationRejectsInvalidHardwareTemperature(t *testing.T) {
 	}}
 	if err := payload.Validate(now); err == nil {
 		t.Fatal("temperature outside the supported range was accepted")
+	}
+}
+
+func TestValidatesRAIDControllerStatus(t *testing.T) {
+	now := time.Now().UTC()
+	payload := validTestReport(t, now)
+	group := 0
+	enclosure := 32
+	progress := 42.5
+	payload.Metrics.RAIDControllers = []RAIDControllerStatus{{
+		ControllerID: 0, Model: "PERC H330 Adapter", State: "Needs Attention",
+		PhysicalDriveCount: 2, DriveGroupCount: 1, VirtualDriveCount: 1,
+		VirtualDrives: []RAIDVirtualDriveStatus{{DriveGroupID: 0, VirtualDriveID: 0, RAIDLevel: "RAID1", State: "Dgrd", SizeBytes: 2_000_000_000_000}},
+		PhysicalDrives: []RAIDPhysicalDriveStatus{{
+			EnclosureID: &enclosure, Slot: 0, DeviceID: 0, State: "Rbld", DriveGroupID: &group,
+			SizeBytes: 2_000_000_000_000, Interface: "SATA", MediaType: "HDD", SectorSizeBytes: 512,
+			Model: "Replacement Disk", RebuildProgress: &progress,
+		}},
+	}}
+	if err := payload.Validate(now); err != nil {
+		t.Fatalf("valid RAID status was rejected: %v", err)
+	}
+	invalid := 101.0
+	payload.Metrics.RAIDControllers[0].PhysicalDrives[0].RebuildProgress = &invalid
+	if err := payload.Validate(now); err == nil {
+		t.Fatal("invalid RAID rebuild progress was accepted")
 	}
 }
 

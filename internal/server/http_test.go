@@ -501,6 +501,34 @@ func TestWebUIPrioritizesReportedSMARTStatus(t *testing.T) {
 			t.Errorf("SMART status messaging does not contain %q", fragment)
 		}
 	}
+	for _, fragment := range []string{
+		`scsi_grown_defects`, `scsi_ecc_corrected_delta`, `scsi_non_medium_errors_delta`,
+		`本周期 SAS ECC 纠错增加`, `本周期 SAS 非介质错误增加`,
+	} {
+		if !strings.Contains(script, fragment) {
+			t.Errorf("SAS health UI does not contain %q", fragment)
+		}
+	}
+}
+
+func TestWebUIShowsRAIDControllerTopologyAndRebuildProgress(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /assets/app.js returned %d", response.Code)
+	}
+	script := response.Body.String()
+	for _, fragment := range []string{
+		"raidSection(detail.raid_controllers)", "RAID 控制器", "机箱:槽位",
+		"item.interface", "item.media_type", "item.rebuild_progress", "estimated_time_left",
+		`dgrd: "降级"`, `jbod: "JBOD"`, `onln: "在线"`, `rbld: "重建中"`,
+	} {
+		if !strings.Contains(script, fragment) {
+			t.Errorf("RAID controller UI does not contain %q", fragment)
+		}
+	}
 }
 
 func TestHistoryRangeValidation(t *testing.T) {

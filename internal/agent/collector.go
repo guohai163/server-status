@@ -90,6 +90,7 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 	if smartctlPath, lookupErr := exec.LookPath("smartctl"); lookupErr == nil {
 		blockDevices, storageHealth = collectStorageHealth(ctx, smartctlPath, blockDevices)
 	}
+	raidControllers := collectRAIDStatus(ctx)
 	diskMetrics, err := collector.collectDisk(ctx, blockDevices)
 	if err != nil {
 		return report.Report{}, err
@@ -172,12 +173,13 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 				SwapUsedBytes:  swapMemory.Used,
 				UptimeSeconds:  hostInfo.Uptime,
 			},
-			Disk:          diskMetrics,
-			Filesystems:   filesystemMetrics,
-			Network:       networkMetrics,
-			GPUs:          gpuMetrics,
-			Temperatures:  temperatures,
-			StorageHealth: storageHealth,
+			Disk:            diskMetrics,
+			Filesystems:     filesystemMetrics,
+			Network:         networkMetrics,
+			GPUs:            gpuMetrics,
+			Temperatures:    temperatures,
+			StorageHealth:   storageHealth,
+			RAIDControllers: raidControllers,
 		},
 	}
 	report.NormalizeInventory(&payload.Inventory)

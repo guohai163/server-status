@@ -159,6 +159,9 @@ func TestNodeDetailQueriesIncludeHardwareHealth(t *testing.T) {
 		"monitoring.storage_health_current_metrics",
 		"health.read_error_rate_normalized",
 		"health.uncorrectable_sectors",
+		"health.scsi_grown_defects",
+		"health.scsi_ecc_corrected_delta",
+		"health.scsi_non_medium_errors_delta",
 		"device.raid_passthrough",
 	} {
 		if !strings.Contains(blockDeviceDetailSQL, fragment) {

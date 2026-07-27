@@ -26,7 +26,8 @@ type smartDevice struct {
 
 type smartctlDocument struct {
 	Smartctl struct {
-		ExitStatus int `json:"exit_status"`
+		ExitStatus int      `json:"exit_status"`
+		Output     []string `json:"output"`
 	} `json:"smartctl"`
 	Device        smartDevice `json:"device"`
 	ModelName     string      `json:"model_name"`
@@ -72,6 +73,7 @@ type smartctlDocument struct {
 		Write  smartSCSIErrorCounter `json:"write"`
 		Verify smartSCSIErrorCounter `json:"verify"`
 	} `json:"scsi_error_counter_log"`
+	SCSIGrownDefects json.Number `json:"scsi_grown_defect_list"`
 }
 
 type smartATAAttribute struct {
@@ -83,6 +85,8 @@ type smartATAAttribute struct {
 }
 
 type smartSCSIErrorCounter struct {
+	ECCFast          json.Number `json:"errors_corrected_by_eccfast"`
+	ECCDelayed       json.Number `json:"errors_corrected_by_eccdelayed"`
 	TotalUncorrected json.Number `json:"total_uncorrected_errors"`
 }
 
@@ -116,7 +120,7 @@ func collectStorageHealth(ctx context.Context, smartctlPath string, inventory []
 			defer func() { <-semaphore }()
 			commandContext, commandCancel := context.WithTimeout(ctx, 12*time.Second)
 			defer commandCancel()
-			args := []string{"--all", "--json", "--nocheck=standby"}
+			args := []string{"--all", "--json=o", "--nocheck=standby"}
 			if device.Type != "" {
 				args = append(args, "--device="+device.Type)
 			}
@@ -299,23 +303,21 @@ func storageHealthFromSMART(blockDeviceKey string, document smartctlDocument) St
 	}
 	metric.PercentageUsed = document.NVMeHealth.PercentageUsed
 
-	var scsiErrors uint64
-	var hasSCSIErrors bool
-	for _, counter := range []json.Number{
+	if scsiErrors := sumSMARTCounters(
 		document.SCSIErrorLog.Read.TotalUncorrected,
 		document.SCSIErrorLog.Write.TotalUncorrected,
 		document.SCSIErrorLog.Verify.TotalUncorrected,
-	} {
-		if value := smartUint(counter); value != nil {
-			hasSCSIErrors = true
-			if math.MaxUint64-scsiErrors >= *value {
-				scsiErrors += *value
-			}
-		}
+	); scsiErrors != nil {
+		metric.ErrorCount = scsiErrors
 	}
-	if hasSCSIErrors {
-		metric.ErrorCount = uint64Pointer(scsiErrors)
-	}
+	metric.SCSIGrownDefects = smartUint(document.SCSIGrownDefects)
+	metric.SCSIECCCorrected = sumSMARTCounters(
+		document.SCSIErrorLog.Read.ECCFast, document.SCSIErrorLog.Read.ECCDelayed,
+		document.SCSIErrorLog.Write.ECCFast, document.SCSIErrorLog.Write.ECCDelayed,
+		document.SCSIErrorLog.Verify.ECCFast, document.SCSIErrorLog.Verify.ECCDelayed,
+	)
+	// smartctl omits this counter from structured JSON, so --json=o exposes its original output line.
+	metric.SCSINonMediumErrors = smartctlOutputCounter(document.Smartctl.Output, "Non-medium error count:")
 
 	for _, attribute := range document.ATAAttributes.Table {
 		raw := smartUint(attribute.Raw.Value)
@@ -351,6 +353,7 @@ func storageHealthFromSMART(blockDeviceKey string, document smartctlDocument) St
 	addReason(nonZero(metric.PendingSectors), true, "pending_sectors")
 	addReason(nonZero(metric.UncorrectableSectors), true, "uncorrectable_sectors")
 	addReason(nonZero(metric.ReallocatedSectors), false, "reallocated_sectors")
+	addReason(nonZero(metric.SCSIGrownDefects), false, "scsi_grown_defects")
 	addReason(nonZero(metric.ErrorCount), false, "device_errors")
 	addReason(document.Smartctl.ExitStatus&0x20 != 0, false, "age_attribute")
 	addReason(document.Smartctl.ExitStatus&0x40 != 0, false, "device_error_log")
@@ -381,6 +384,40 @@ func smartUint(value json.Number) *uint64 {
 		return nil
 	}
 	return &parsed
+}
+
+func sumSMARTCounters(counters ...json.Number) *uint64 {
+	var total uint64
+	found := false
+	for _, counter := range counters {
+		value := smartUint(counter)
+		if value == nil {
+			continue
+		}
+		found = true
+		if *value > math.MaxInt64-total {
+			return nil
+		}
+		total += *value
+	}
+	if !found {
+		return nil
+	}
+	return uint64Pointer(total)
+}
+
+func smartctlOutputCounter(lines []string, label string) *uint64 {
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, label) {
+			continue
+		}
+		fields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, label)))
+		if len(fields) > 0 {
+			return smartUint(json.Number(fields[0]))
+		}
+	}
+	return nil
 }
 
 func uint64Pointer(value uint64) *uint64 {

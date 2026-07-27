@@ -158,13 +158,48 @@ INSERT INTO monitoring.temperature_current_metrics (
 INSERT INTO monitoring.storage_health_current_metrics (
     node_id, block_device_id, bucket_at, collected_at, received_at,
     smart_available, smart_enabled, smart_status, risk_level, risk_reasons,
-    temperature_celsius, power_on_hours, error_count, reallocated_sectors
+    temperature_celsius, power_on_hours, error_count, reallocated_sectors,
+    scsi_grown_defects, scsi_ecc_corrected, scsi_ecc_corrected_delta,
+    scsi_non_medium_errors, scsi_non_medium_errors_delta
 ) VALUES (
     '10000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000002',
     date_trunc('minute', CURRENT_TIMESTAMP), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
-    true, true, 'passed', 'warning', ARRAY['reallocated_sectors'],
-    38, 24000, 0, 2
+    true, true, 'passed', 'warning', ARRAY['reallocated_sectors', 'scsi_grown_defects'],
+    38, 24000, 0, 2, 1, 13975, 0, 41, 0
 );
+
+INSERT INTO monitoring.raid_status_current_snapshots (
+    node_id, bucket_at, collected_at, received_at
+) VALUES (
+    '10000000-0000-0000-0000-000000000001', date_trunc('minute', CURRENT_TIMESTAMP),
+    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+);
+
+INSERT INTO monitoring.raid_controller_current_metrics (
+    node_id, controller_id, model, state, physical_drive_count,
+    drive_group_count, virtual_drive_count
+) VALUES (
+    '10000000-0000-0000-0000-000000000001', 0, 'PERC H330 Adapter',
+    'Needs Attention', 2, 1, 1
+);
+
+INSERT INTO monitoring.raid_virtual_drive_current_metrics (
+    node_id, controller_id, drive_group_id, virtual_drive_id, raid_level,
+    state, access, consistency, cache, size_bytes, name
+) VALUES (
+    '10000000-0000-0000-0000-000000000001', 0, 0, 0, 'RAID1',
+    'Dgrd', 'RW', 'No', 'NRWTD', 1998900000000, 'GenericR1_0'
+);
+
+INSERT INTO monitoring.raid_physical_drive_current_metrics (
+    node_id, controller_id, enclosure_id, slot, device_id, state,
+    drive_group_id, size_bytes, interface, media_type, sector_size_bytes,
+    model, spun, rebuild_progress, rebuild_status, estimated_time_left
+) VALUES
+    ('10000000-0000-0000-0000-000000000001', 0, 32, 0, 0, 'JBOD',
+     NULL, 2000000000000, 'SAS', 'HDD', 512, 'MG03SCA200', 'U', NULL, '', ''),
+    ('10000000-0000-0000-0000-000000000001', 0, 32, 1, 1, 'Onln',
+     0, 1998900000000, 'SATA', 'HDD', 512, 'ST2000DM001-1ER164', 'U', NULL, '', '');
 
 INSERT INTO monitoring.filesystems (
     id, node_id, filesystem_key, filesystem_uuid, device_name,
@@ -397,8 +432,30 @@ BEGIN
            AND device.smart_device_type = 'megaraid,1'
            AND health.risk_level = 'warning'
            AND health.power_on_hours = 24000
+           AND health.scsi_grown_defects = 1
+           AND health.scsi_ecc_corrected = 13975
+           AND health.scsi_non_medium_errors = 41
     ) THEN
         RAISE EXCEPTION 'RAID passthrough SMART health was not persisted';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+          FROM monitoring.raid_controller_current_metrics controller
+          JOIN monitoring.raid_virtual_drive_current_metrics virtual_drive
+            ON virtual_drive.node_id = controller.node_id
+           AND virtual_drive.controller_id = controller.controller_id
+          JOIN monitoring.raid_physical_drive_current_metrics physical_drive
+            ON physical_drive.node_id = controller.node_id
+           AND physical_drive.controller_id = controller.controller_id
+         WHERE controller.node_id = '10000000-0000-0000-0000-000000000001'
+           AND controller.model = 'PERC H330 Adapter'
+           AND virtual_drive.state = 'Dgrd'
+           AND physical_drive.slot = 0
+           AND physical_drive.state = 'JBOD'
+           AND physical_drive.interface = 'SAS'
+    ) THEN
+        RAISE EXCEPTION 'RAID controller topology was not persisted';
     END IF;
 
     SELECT cardinality(addresses) INTO v_count
@@ -640,12 +697,24 @@ BEGIN
        NOT has_table_privilege('server_status_writer', 'monitoring.storage_health_current_metrics', 'INSERT') THEN
         RAISE EXCEPTION 'writer role lacks INSERT on hardware health metrics';
     END IF;
+    IF NOT has_table_privilege('server_status_writer', 'monitoring.raid_status_current_snapshots', 'INSERT') OR
+       NOT has_table_privilege('server_status_writer', 'monitoring.raid_controller_current_metrics', 'INSERT') OR
+       NOT has_table_privilege('server_status_writer', 'monitoring.raid_virtual_drive_current_metrics', 'INSERT') OR
+       NOT has_table_privilege('server_status_writer', 'monitoring.raid_physical_drive_current_metrics', 'INSERT') THEN
+        RAISE EXCEPTION 'writer role lacks INSERT on RAID status tables';
+    END IF;
     IF has_table_privilege('server_status_reader', 'monitoring.gpu_metric_samples', 'INSERT') THEN
         RAISE EXCEPTION 'reader role can modify GPU raw metrics';
     END IF;
     IF has_table_privilege('server_status_reader', 'monitoring.temperature_current_metrics', 'INSERT') OR
        has_table_privilege('server_status_reader', 'monitoring.storage_health_current_metrics', 'INSERT') THEN
         RAISE EXCEPTION 'reader role can modify hardware health metrics';
+    END IF;
+    IF has_table_privilege('server_status_reader', 'monitoring.raid_status_current_snapshots', 'INSERT') OR
+       has_table_privilege('server_status_reader', 'monitoring.raid_controller_current_metrics', 'INSERT') OR
+       has_table_privilege('server_status_reader', 'monitoring.raid_virtual_drive_current_metrics', 'INSERT') OR
+       has_table_privilege('server_status_reader', 'monitoring.raid_physical_drive_current_metrics', 'INSERT') THEN
+        RAISE EXCEPTION 'reader role can modify RAID status tables';
     END IF;
     IF has_table_privilege('server_status_reader', 'monitoring.node_network_preferences', 'INSERT') THEN
         RAISE EXCEPTION 'reader role can modify dashboard network preferences';

@@ -106,32 +106,79 @@ type MemoryHardware struct {
 }
 
 type BlockDeviceHardware struct {
-	DeviceName              string     `json:"device_name"`
-	DeviceKind              string     `json:"device_kind"`
-	Vendor                  string     `json:"vendor,omitempty"`
-	ModelName               string     `json:"model_name,omitempty"`
-	SerialNumber            string     `json:"serial_number,omitempty"`
-	WWN                     string     `json:"wwn,omitempty"`
-	SizeBytes               int64      `json:"size_bytes"`
-	Rotational              *bool      `json:"rotational,omitempty"`
-	Protocol                string     `json:"protocol,omitempty"`
-	SMARTDeviceType         string     `json:"smart_device_type,omitempty"`
-	RAIDPassthrough         bool       `json:"raid_passthrough"`
-	HealthCollectedAt       *time.Time `json:"health_collected_at,omitempty"`
-	SMARTAvailable          bool       `json:"smart_available"`
-	SMARTEnabled            bool       `json:"smart_enabled"`
-	SMARTStatus             string     `json:"smart_status,omitempty"`
-	RiskLevel               string     `json:"risk_level,omitempty"`
-	RiskReasons             []string   `json:"risk_reasons,omitempty"`
-	TemperatureCelsius      *float64   `json:"temperature_celsius,omitempty"`
-	PowerOnHours            *int64     `json:"power_on_hours,omitempty"`
-	ErrorCount              *int64     `json:"error_count,omitempty"`
-	ReadErrorRateNormalized *int64     `json:"read_error_rate_normalized,omitempty"`
-	ReadErrorRateRaw        *int64     `json:"read_error_rate_raw,omitempty"`
-	ReallocatedSectors      *int64     `json:"reallocated_sectors,omitempty"`
-	PendingSectors          *int64     `json:"pending_sectors,omitempty"`
-	UncorrectableSectors    *int64     `json:"uncorrectable_sectors,omitempty"`
-	PercentageUsed          *float64   `json:"percentage_used,omitempty"`
+	DeviceName               string     `json:"device_name"`
+	DeviceKind               string     `json:"device_kind"`
+	Vendor                   string     `json:"vendor,omitempty"`
+	ModelName                string     `json:"model_name,omitempty"`
+	SerialNumber             string     `json:"serial_number,omitempty"`
+	WWN                      string     `json:"wwn,omitempty"`
+	SizeBytes                int64      `json:"size_bytes"`
+	Rotational               *bool      `json:"rotational,omitempty"`
+	Protocol                 string     `json:"protocol,omitempty"`
+	SMARTDeviceType          string     `json:"smart_device_type,omitempty"`
+	RAIDPassthrough          bool       `json:"raid_passthrough"`
+	HealthCollectedAt        *time.Time `json:"health_collected_at,omitempty"`
+	SMARTAvailable           bool       `json:"smart_available"`
+	SMARTEnabled             bool       `json:"smart_enabled"`
+	SMARTStatus              string     `json:"smart_status,omitempty"`
+	RiskLevel                string     `json:"risk_level,omitempty"`
+	RiskReasons              []string   `json:"risk_reasons,omitempty"`
+	TemperatureCelsius       *float64   `json:"temperature_celsius,omitempty"`
+	PowerOnHours             *int64     `json:"power_on_hours,omitempty"`
+	ErrorCount               *int64     `json:"error_count,omitempty"`
+	ReadErrorRateNormalized  *int64     `json:"read_error_rate_normalized,omitempty"`
+	ReadErrorRateRaw         *int64     `json:"read_error_rate_raw,omitempty"`
+	ReallocatedSectors       *int64     `json:"reallocated_sectors,omitempty"`
+	PendingSectors           *int64     `json:"pending_sectors,omitempty"`
+	UncorrectableSectors     *int64     `json:"uncorrectable_sectors,omitempty"`
+	SCSIGrownDefects         *int64     `json:"scsi_grown_defects,omitempty"`
+	SCSIECCCorrected         *int64     `json:"scsi_ecc_corrected,omitempty"`
+	SCSIECCCorrectedDelta    *int64     `json:"scsi_ecc_corrected_delta,omitempty"`
+	SCSINonMediumErrors      *int64     `json:"scsi_non_medium_errors,omitempty"`
+	SCSINonMediumErrorsDelta *int64     `json:"scsi_non_medium_errors_delta,omitempty"`
+	PercentageUsed           *float64   `json:"percentage_used,omitempty"`
+}
+
+type RAIDControllerStatus struct {
+	ControllerID       int                       `json:"controller_id"`
+	Model              string                    `json:"model"`
+	State              string                    `json:"state"`
+	PhysicalDriveCount int                       `json:"physical_drive_count"`
+	DriveGroupCount    int                       `json:"drive_group_count"`
+	VirtualDriveCount  int                       `json:"virtual_drive_count"`
+	CollectedAt        time.Time                 `json:"collected_at"`
+	VirtualDrives      []RAIDVirtualDriveStatus  `json:"virtual_drives"`
+	PhysicalDrives     []RAIDPhysicalDriveStatus `json:"physical_drives"`
+}
+
+type RAIDVirtualDriveStatus struct {
+	DriveGroupID   int    `json:"drive_group_id"`
+	VirtualDriveID int    `json:"virtual_drive_id"`
+	RAIDLevel      string `json:"raid_level"`
+	State          string `json:"state"`
+	Access         string `json:"access,omitempty"`
+	Consistency    string `json:"consistency,omitempty"`
+	Cache          string `json:"cache,omitempty"`
+	SizeBytes      int64  `json:"size_bytes"`
+	Name           string `json:"name,omitempty"`
+}
+
+type RAIDPhysicalDriveStatus struct {
+	EnclosureID       *int     `json:"enclosure_id,omitempty"`
+	Slot              int      `json:"slot"`
+	DeviceID          int      `json:"device_id"`
+	State             string   `json:"state"`
+	DriveGroupID      *int     `json:"drive_group_id,omitempty"`
+	SizeBytes         int64    `json:"size_bytes"`
+	Interface         string   `json:"interface"`
+	MediaType         string   `json:"media_type"`
+	SectorSizeBytes   int64    `json:"sector_size_bytes,omitempty"`
+	Model             string   `json:"model"`
+	Spun              string   `json:"spun,omitempty"`
+	DriveType         string   `json:"drive_type,omitempty"`
+	RebuildProgress   *float64 `json:"rebuild_progress,omitempty"`
+	RebuildStatus     string   `json:"rebuild_status,omitempty"`
+	EstimatedTimeLeft string   `json:"estimated_time_left,omitempty"`
 }
 
 type TemperatureStatus struct {
@@ -157,14 +204,15 @@ type GPUStatus struct {
 }
 
 type NodeDetail struct {
-	Node          NodeSummary           `json:"node"`
-	CPUPackages   []CPUHardware         `json:"cpu_packages"`
-	MemoryModules []MemoryHardware      `json:"memory_modules"`
-	BlockDevices  []BlockDeviceHardware `json:"block_devices"`
-	Temperatures  []TemperatureStatus   `json:"temperatures"`
-	GPUs          []GPUStatus           `json:"gpus"`
-	Filesystems   []FilesystemStatus    `json:"filesystems"`
-	Network       []NetworkStatus       `json:"network"`
+	Node            NodeSummary            `json:"node"`
+	CPUPackages     []CPUHardware          `json:"cpu_packages"`
+	MemoryModules   []MemoryHardware       `json:"memory_modules"`
+	BlockDevices    []BlockDeviceHardware  `json:"block_devices"`
+	RAIDControllers []RAIDControllerStatus `json:"raid_controllers"`
+	Temperatures    []TemperatureStatus    `json:"temperatures"`
+	GPUs            []GPUStatus            `json:"gpus"`
+	Filesystems     []FilesystemStatus     `json:"filesystems"`
+	Network         []NetworkStatus        `json:"network"`
 }
 
 type HistoryPoint struct {
@@ -249,6 +297,10 @@ func (store *Store) GetNode(ctx context.Context, nodeID string) (NodeDetail, err
 	if err != nil {
 		return NodeDetail{}, err
 	}
+	raidControllers, err := store.listRAIDControllers(ctx, nodeID)
+	if err != nil {
+		return NodeDetail{}, err
+	}
 	gpus, err := store.listGPUs(ctx, nodeID)
 	if err != nil {
 		return NodeDetail{}, err
@@ -259,7 +311,8 @@ func (store *Store) GetNode(ctx context.Context, nodeID string) (NodeDetail, err
 	}
 	return NodeDetail{
 		Node: summary, CPUPackages: cpuPackages, MemoryModules: memoryModules,
-		BlockDevices: blockDevices, Temperatures: temperatures, GPUs: gpus, Filesystems: filesystems, Network: network,
+		BlockDevices: blockDevices, RAIDControllers: raidControllers, Temperatures: temperatures,
+		GPUs: gpus, Filesystems: filesystems, Network: network,
 	}, nil
 }
 
@@ -559,7 +612,9 @@ func (store *Store) listBlockDevices(ctx context.Context, nodeID string) ([]Bloc
 			&item.SMARTStatus, &item.RiskLevel, &item.RiskReasons, &item.TemperatureCelsius,
 			&item.PowerOnHours, &item.ErrorCount, &item.ReadErrorRateNormalized,
 			&item.ReadErrorRateRaw, &item.ReallocatedSectors, &item.PendingSectors,
-			&item.UncorrectableSectors, &item.PercentageUsed,
+			&item.UncorrectableSectors, &item.SCSIGrownDefects, &item.SCSIECCCorrected,
+			&item.SCSIECCCorrectedDelta, &item.SCSINonMediumErrors,
+			&item.SCSINonMediumErrorsDelta, &item.PercentageUsed,
 		); err != nil {
 			return nil, fmt.Errorf("scan block device: %w", err)
 		}
@@ -577,13 +632,122 @@ const blockDeviceDetailSQL = `
 		       COALESCE(health.risk_reasons, ARRAY[]::text[]), health.temperature_celsius,
 		       health.power_on_hours, health.error_count, health.read_error_rate_normalized,
 		       health.read_error_rate_raw, health.reallocated_sectors, health.pending_sectors,
-		       health.uncorrectable_sectors, health.percentage_used
+		       health.uncorrectable_sectors, health.scsi_grown_defects,
+		       health.scsi_ecc_corrected, health.scsi_ecc_corrected_delta,
+		       health.scsi_non_medium_errors, health.scsi_non_medium_errors_delta,
+		       health.percentage_used
 		  FROM monitoring.block_devices device
 		  LEFT JOIN monitoring.storage_health_current_metrics health
 		    ON health.node_id = device.node_id AND health.block_device_id = device.id
 		 WHERE device.node_id = $1::uuid AND device.removed_at IS NULL
-		 ORDER BY device.device_name, device.smart_device_type
+	 ORDER BY device.device_name, device.smart_device_type
 `
+
+func (store *Store) listRAIDControllers(ctx context.Context, nodeID string) ([]RAIDControllerStatus, error) {
+	rows, err := store.pool.Query(ctx, `
+		SELECT controller.controller_id, controller.model, controller.state,
+		       controller.physical_drive_count, controller.drive_group_count,
+		       controller.virtual_drive_count, snapshot.collected_at
+		  FROM monitoring.raid_controller_current_metrics controller
+		  JOIN monitoring.raid_status_current_snapshots snapshot
+		    ON snapshot.node_id = controller.node_id
+		 WHERE controller.node_id = $1::uuid
+		 ORDER BY controller.controller_id
+	`, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("query RAID controllers: %w", err)
+	}
+	controllers := make([]RAIDControllerStatus, 0)
+	positions := make(map[int]int)
+	for rows.Next() {
+		var item RAIDControllerStatus
+		if err := rows.Scan(
+			&item.ControllerID, &item.Model, &item.State,
+			&item.PhysicalDriveCount, &item.DriveGroupCount, &item.VirtualDriveCount,
+			&item.CollectedAt,
+		); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan RAID controller: %w", err)
+		}
+		item.VirtualDrives = []RAIDVirtualDriveStatus{}
+		item.PhysicalDrives = []RAIDPhysicalDriveStatus{}
+		positions[item.ControllerID] = len(controllers)
+		controllers = append(controllers, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("iterate RAID controllers: %w", err)
+	}
+	rows.Close()
+	if len(controllers) == 0 {
+		return controllers, nil
+	}
+
+	virtualRows, err := store.pool.Query(ctx, `
+		SELECT controller_id, drive_group_id, virtual_drive_id, raid_level, state,
+		       COALESCE(access, ''), COALESCE(consistency, ''), COALESCE(cache, ''),
+		       size_bytes, COALESCE(name, '')
+		  FROM monitoring.raid_virtual_drive_current_metrics
+		 WHERE node_id = $1::uuid
+		 ORDER BY controller_id, drive_group_id, virtual_drive_id
+	`, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("query RAID virtual drives: %w", err)
+	}
+	for virtualRows.Next() {
+		var controllerID int
+		var item RAIDVirtualDriveStatus
+		if err := virtualRows.Scan(
+			&controllerID, &item.DriveGroupID, &item.VirtualDriveID, &item.RAIDLevel,
+			&item.State, &item.Access, &item.Consistency, &item.Cache, &item.SizeBytes, &item.Name,
+		); err != nil {
+			virtualRows.Close()
+			return nil, fmt.Errorf("scan RAID virtual drive: %w", err)
+		}
+		if position, ok := positions[controllerID]; ok {
+			controllers[position].VirtualDrives = append(controllers[position].VirtualDrives, item)
+		}
+	}
+	if err := virtualRows.Err(); err != nil {
+		virtualRows.Close()
+		return nil, fmt.Errorf("iterate RAID virtual drives: %w", err)
+	}
+	virtualRows.Close()
+
+	physicalRows, err := store.pool.Query(ctx, `
+		SELECT controller_id, NULLIF(enclosure_id, -1), slot, device_id, state,
+		       drive_group_id, size_bytes, interface, media_type,
+		       COALESCE(sector_size_bytes, 0), model, COALESCE(spun, ''),
+		       COALESCE(drive_type, ''), rebuild_progress::double precision,
+		       COALESCE(rebuild_status, ''), COALESCE(estimated_time_left, '')
+		  FROM monitoring.raid_physical_drive_current_metrics
+		 WHERE node_id = $1::uuid
+		 ORDER BY controller_id, enclosure_id, slot
+	`, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("query RAID physical drives: %w", err)
+	}
+	defer physicalRows.Close()
+	for physicalRows.Next() {
+		var controllerID int
+		var item RAIDPhysicalDriveStatus
+		if err := physicalRows.Scan(
+			&controllerID, &item.EnclosureID, &item.Slot, &item.DeviceID, &item.State,
+			&item.DriveGroupID, &item.SizeBytes, &item.Interface, &item.MediaType,
+			&item.SectorSizeBytes, &item.Model, &item.Spun, &item.DriveType,
+			&item.RebuildProgress, &item.RebuildStatus, &item.EstimatedTimeLeft,
+		); err != nil {
+			return nil, fmt.Errorf("scan RAID physical drive: %w", err)
+		}
+		if position, ok := positions[controllerID]; ok {
+			controllers[position].PhysicalDrives = append(controllers[position].PhysicalDrives, item)
+		}
+	}
+	if err := physicalRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate RAID physical drives: %w", err)
+	}
+	return controllers, nil
+}
 
 func (store *Store) listTemperatures(ctx context.Context, nodeID string) ([]TemperatureStatus, error) {
 	rows, err := store.pool.Query(ctx, temperatureDetailSQL, nodeID)

@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -223,7 +224,7 @@ func validateMetrics(inventory Inventory, metrics Metrics) error {
 			return fmt.Errorf("GPU metric %q memory usage exceeds its total", item.GPUKey)
 		}
 	}
-	if len(metrics.Temperatures) > 4096 || len(metrics.StorageHealth) > 4096 {
+	if len(metrics.Temperatures) > 4096 || len(metrics.StorageHealth) > 4096 || len(metrics.RAIDControllers) > 64 {
 		return errors.New("metrics contain too many hardware health resources")
 	}
 	if err := uniqueKeys("temperature metric", len(metrics.Temperatures), func(i int) string { return metrics.Temperatures[i].Key }); err != nil {
@@ -274,7 +275,8 @@ func validateMetrics(inventory Inventory, metrics Metrics) error {
 			switch reason {
 			case "smart_failed", "prefail_attribute", "nvme_critical_warning", "pending_sectors",
 				"uncorrectable_sectors", "reallocated_sectors", "device_errors", "age_attribute",
-				"device_error_log", "self_test_errors", "wear_exhausted", "wear_high":
+				"device_error_log", "self_test_errors", "wear_exhausted", "wear_high",
+				"scsi_grown_defects", "scsi_ecc_errors_increased", "scsi_non_medium_errors_increased":
 			default:
 				return fmt.Errorf("storage health metric %q has invalid risk reason", item.BlockDeviceKey)
 			}
@@ -286,8 +288,55 @@ func validateMetrics(inventory Inventory, metrics Metrics) error {
 		if err := validateOptionalUnsignedBigints(
 			item.PowerOnHours, item.ErrorCount, item.ReadErrorRateNormalized, item.ReadErrorRateRaw,
 			item.ReallocatedSectors, item.PendingSectors, item.UncorrectableSectors,
+			item.SCSIGrownDefects, item.SCSIECCCorrected, item.SCSINonMediumErrors,
 		); err != nil {
 			return fmt.Errorf("storage health metric %q: %w", item.BlockDeviceKey, err)
+		}
+	}
+	if err := uniqueKeys("RAID controller", len(metrics.RAIDControllers), func(i int) string {
+		return strconv.Itoa(metrics.RAIDControllers[i].ControllerID)
+	}); err != nil {
+		return err
+	}
+	for _, controller := range metrics.RAIDControllers {
+		if controller.ControllerID < 0 || strings.TrimSpace(controller.Model) == "" || strings.TrimSpace(controller.State) == "" ||
+			controller.PhysicalDriveCount < 0 || controller.DriveGroupCount < 0 || controller.VirtualDriveCount < 0 ||
+			len(controller.PhysicalDrives) > 4096 || len(controller.VirtualDrives) > 1024 {
+			return fmt.Errorf("invalid RAID controller %d", controller.ControllerID)
+		}
+		if controller.PhysicalDriveCount < len(controller.PhysicalDrives) || controller.VirtualDriveCount < len(controller.VirtualDrives) {
+			return fmt.Errorf("RAID controller %d counts are smaller than its reported drives", controller.ControllerID)
+		}
+		if err := uniqueKeys("RAID virtual drive", len(controller.VirtualDrives), func(i int) string {
+			drive := controller.VirtualDrives[i]
+			return fmt.Sprintf("%d/%d", drive.DriveGroupID, drive.VirtualDriveID)
+		}); err != nil {
+			return err
+		}
+		for _, drive := range controller.VirtualDrives {
+			if drive.DriveGroupID < 0 || drive.VirtualDriveID < 0 || strings.TrimSpace(drive.RAIDLevel) == "" ||
+				strings.TrimSpace(drive.State) == "" || drive.SizeBytes == 0 || drive.SizeBytes > math.MaxInt64 {
+				return fmt.Errorf("invalid RAID virtual drive %d/%d", drive.DriveGroupID, drive.VirtualDriveID)
+			}
+		}
+		if err := uniqueKeys("RAID physical drive", len(controller.PhysicalDrives), func(i int) string {
+			drive := controller.PhysicalDrives[i]
+			enclosure := -1
+			if drive.EnclosureID != nil {
+				enclosure = *drive.EnclosureID
+			}
+			return fmt.Sprintf("%d/%d", enclosure, drive.Slot)
+		}); err != nil {
+			return err
+		}
+		for _, drive := range controller.PhysicalDrives {
+			if drive.EnclosureID != nil && *drive.EnclosureID < 0 || drive.Slot < 0 || drive.DeviceID < 0 ||
+				drive.DriveGroupID != nil && *drive.DriveGroupID < 0 || strings.TrimSpace(drive.State) == "" ||
+				strings.TrimSpace(drive.Interface) == "" || strings.TrimSpace(drive.MediaType) == "" || strings.TrimSpace(drive.Model) == "" ||
+				drive.SizeBytes == 0 || drive.SizeBytes > math.MaxInt64 || drive.SectorSizeBytes > math.MaxInt64 ||
+				drive.RebuildProgress != nil && (*drive.RebuildProgress < 0 || *drive.RebuildProgress > 100 || math.IsNaN(*drive.RebuildProgress) || math.IsInf(*drive.RebuildProgress, 0)) {
+				return fmt.Errorf("invalid RAID physical drive in slot %d", drive.Slot)
+			}
 		}
 	}
 	return nil

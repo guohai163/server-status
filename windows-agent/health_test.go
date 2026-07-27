@@ -71,6 +71,48 @@ func TestSMARTNVMeCriticalHealth(t *testing.T) {
 	}
 }
 
+func TestSMARTSCSIHealthCounters(t *testing.T) {
+	document, err := parseSMARTDocument([]byte(`{
+  "smartctl":{"exit_status":0,"output":["Non-medium error count:       41"]},
+  "device":{"name":"/dev/bus/1","type":"megaraid,11","protocol":"SCSI"},
+  "scsi_vendor":"TOSHIBA","scsi_product":"MG03SCA200","serial_number":"SAS-1",
+  "smart_support":{"available":true,"enabled":true},"smart_status":{"passed":true},
+  "scsi_grown_defect_list":0,
+  "scsi_error_counter_log":{
+    "read":{"errors_corrected_by_eccfast":2,"errors_corrected_by_eccdelayed":3,"total_uncorrected_errors":0},
+    "write":{"errors_corrected_by_eccfast":4,"errors_corrected_by_eccdelayed":0,"total_uncorrected_errors":0},
+    "verify":{"errors_corrected_by_eccfast":0,"errors_corrected_by_eccdelayed":5,"total_uncorrected_errors":0}
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	metric := storageHealthFromSMART("SAS-1", document)
+	if metric.ErrorCount == nil || *metric.ErrorCount != 0 ||
+		metric.SCSIGrownDefects == nil || *metric.SCSIGrownDefects != 0 ||
+		metric.SCSIECCCorrected == nil || *metric.SCSIECCCorrected != 14 ||
+		metric.SCSINonMediumErrors == nil || *metric.SCSINonMediumErrors != 41 {
+		t.Fatalf("unexpected SCSI counters: %+v", metric)
+	}
+	if metric.RiskLevel != "healthy" || len(metric.RiskReasons) != 0 {
+		t.Fatalf("cumulative SCSI ECC/non-medium counters caused a warning: %+v", metric)
+	}
+	document.SCSIGrownDefects = "1"
+	metric = storageHealthFromSMART("SAS-1", document)
+	if metric.RiskLevel != "warning" || !hasStorageRiskReason(metric.RiskReasons, "scsi_grown_defects") {
+		t.Fatalf("SCSI grown defect did not cause a warning: %+v", metric)
+	}
+}
+
+func hasStorageRiskReason(reasons []string, expected string) bool {
+	for _, reason := range reasons {
+		if reason == expected {
+			return true
+		}
+	}
+	return false
+}
+
 func TestMergeSMARTAddsRAIDMember(t *testing.T) {
 	document, err := parseSMARTDocument([]byte(`{
   "smartctl":{"exit_status":0},

@@ -25,7 +25,7 @@ curl http://10.12.54.200:8080/readyz
 
 数据库使用专用登录角色 `server_status_app`，该角色只继承 `server_status_writer`，没有超级用户、建库或建角色权限。
 
-升级时使用迁移账号按顺序执行尚未安装的迁移，当前最新为 `db/migrations/V009__hardware_health_metrics.sql`。中央服务启动时只校验 V009 是否存在，不会使用运行时 writer 账号自动修改 schema。
+升级时使用迁移账号按顺序执行尚未安装的迁移，当前最新为 `db/migrations/V011__raid_controller_status.sql`。中央服务启动时只校验 V011 是否存在，不会使用运行时 writer 账号自动修改 schema。
 
 ## 节点 Agent
 
@@ -39,6 +39,8 @@ curl http://10.12.54.200:8080/readyz
 目标节点只需要 Linux、`sudo`、`curl`、`crontab` 与 `sha256sum`，不需要 Go、make、Python、仓库副本或 SSH 服务。当前列出的长期验证节点仍保留旧版用户目录部署，重新执行中心生成的新安装命令后才会迁移到 `/opt/server-agent`。
 
 Linux 温度通过 `/sys/class/hwmon` 采集。SMART 是可选能力：安装 smartmontools 7.0 及以上后，root Agent 会通过 `smartctl --scan-open --json` 自动发现直连盘和受支持 RAID 控制器后的物理成员盘。缺少工具、SMART 不可用或控制器不支持透传不会使 Agent 上报失败。旧版用户目录 Agent 通常没有读取 SMART/RAID ioctl 的权限，应迁移为当前 root 安装方式后再启用。
+
+RAID 控制器拓扑也是可选能力。Linux Agent 会自动发现 PATH 中的 `storcli64`、`storcli`、`perccli64` 或 `perccli`，并兼容 `/usr/local/bin/storcli64`、`/opt/MegaRAID/storcli/storcli64` 和 `/opt/MegaRAID/perccli/perccli64`。工具可用时详情页显示控制器、虚拟盘、物理盘接口与状态；处于重建状态的盘还显示百分比和控制器返回的预计剩余时间。
 
 Windows Agent 首次安装和执行 `upgrade` 时会从中心 Release 接口自动下载经过校验的 smartmontools 7.5 安装器，只提取 `smartctl`、驱动数据库和许可证文档到 Agent 目录。目标 Windows 节点不访问 GitHub；下载失败时保留已有工具并继续上报非 SMART 指标。
 

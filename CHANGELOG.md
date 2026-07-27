@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+## v0.17.0 - 2026-07-27
+
+### Added
+- Collect SAS grown defect, ECC-corrected, and non-medium error counters on Linux and Windows, derive ECC/non-medium increments from accepted snapshots, and expose the totals and increments in storage health details.
+- Discover StorCLI/PERCCLI on Linux and show each RAID controller, virtual drive, physical slot, disk interface, controller state, and active rebuild progress in node details.
+
 ## v0.16.3 - 2026-07-25
 
 ### Fixed

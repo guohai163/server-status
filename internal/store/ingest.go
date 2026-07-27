@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
+	"sort"
 	"time"
 
 	"github.com/guohai/server-status/internal/report"
@@ -214,10 +216,89 @@ func (store *Store) Ingest(ctx context.Context, auth NodeAuth, payload report.Re
 	if err := replaceStorageHealthMetrics(ctx, tx, auth.NodeID, bucketAt, payload.CollectedAt.UTC(), receivedAt, blockDeviceIDs, payload.Metrics.StorageHealth); err != nil {
 		return err
 	}
+	if err := replaceRAIDStatus(ctx, tx, auth.NodeID, bucketAt, payload.CollectedAt.UTC(), receivedAt, payload.Metrics.RAIDControllers); err != nil {
+		return err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit report: %w", err)
 	}
 	return nil
+}
+
+func replaceRAIDStatus(ctx context.Context, tx pgx.Tx, nodeID string, bucketAt, collectedAt, receivedAt time.Time, controllers []report.RAIDControllerStatus) error {
+	replace, err := currentSnapshotCanBeReplaced(ctx, tx, raidStatusSnapshotFreshnessSQL, nodeID, bucketAt)
+	if err != nil {
+		return fmt.Errorf("check RAID status freshness: %w", err)
+	}
+	if !replace {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM monitoring.raid_status_current_snapshots WHERE node_id = $1::uuid`, nodeID); err != nil {
+		return fmt.Errorf("replace RAID status snapshot: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO monitoring.raid_status_current_snapshots (
+			node_id, bucket_at, collected_at, received_at
+		) VALUES ($1::uuid, $2, $3, $4)
+	`, nodeID, bucketAt, collectedAt, receivedAt); err != nil {
+		return fmt.Errorf("insert RAID status snapshot: %w", err)
+	}
+	for _, controller := range controllers {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO monitoring.raid_controller_current_metrics (
+				node_id, controller_id, model, state, physical_drive_count,
+				drive_group_count, virtual_drive_count
+			) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
+		`, nodeID, controller.ControllerID, controller.Model, controller.State,
+			controller.PhysicalDriveCount, controller.DriveGroupCount, controller.VirtualDriveCount); err != nil {
+			return fmt.Errorf("insert RAID controller %d: %w", controller.ControllerID, err)
+		}
+		for _, drive := range controller.VirtualDrives {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO monitoring.raid_virtual_drive_current_metrics (
+					node_id, controller_id, drive_group_id, virtual_drive_id,
+					raid_level, state, access, consistency, cache, size_bytes, name
+				) VALUES (
+					$1::uuid, $2, $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, ''),
+					NULLIF($9, ''), $10, NULLIF($11, '')
+				)
+			`, nodeID, controller.ControllerID, drive.DriveGroupID, drive.VirtualDriveID,
+				drive.RAIDLevel, drive.State, drive.Access, drive.Consistency, drive.Cache,
+				i64(drive.SizeBytes), drive.Name); err != nil {
+				return fmt.Errorf("insert RAID virtual drive %d/%d: %w", drive.DriveGroupID, drive.VirtualDriveID, err)
+			}
+		}
+		for _, drive := range controller.PhysicalDrives {
+			enclosureID := -1
+			if drive.EnclosureID != nil {
+				enclosureID = *drive.EnclosureID
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO monitoring.raid_physical_drive_current_metrics (
+					node_id, controller_id, enclosure_id, slot, device_id, state,
+					drive_group_id, size_bytes, interface, media_type, sector_size_bytes,
+					model, spun, drive_type, rebuild_progress, rebuild_status, estimated_time_left
+				) VALUES (
+					$1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+					$12, NULLIF($13, ''), NULLIF($14, ''), $15, NULLIF($16, ''), NULLIF($17, '')
+				)
+			`, nodeID, controller.ControllerID, enclosureID, drive.Slot, drive.DeviceID,
+				drive.State, drive.DriveGroupID, i64(drive.SizeBytes), drive.Interface,
+				drive.MediaType, nullableI64Value(drive.SectorSizeBytes), drive.Model,
+				drive.Spun, drive.DriveType, drive.RebuildProgress, drive.RebuildStatus,
+				drive.EstimatedTimeLeft); err != nil {
+				return fmt.Errorf("insert RAID physical drive in slot %d: %w", drive.Slot, err)
+			}
+		}
+	}
+	return nil
+}
+
+func nullableI64Value(value uint64) any {
+	if value == 0 {
+		return nil
+	}
+	return i64(value)
 }
 
 func replaceTemperatureMetrics(ctx context.Context, tx pgx.Tx, nodeID string, bucketAt, collectedAt, receivedAt time.Time, metrics []report.TemperatureMetrics) error {
@@ -253,6 +334,10 @@ func replaceStorageHealthMetrics(ctx context.Context, tx pgx.Tx, nodeID string, 
 	if !replace {
 		return nil
 	}
+	previous, err := loadStorageHealthCounters(ctx, tx, nodeID)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM monitoring.storage_health_current_metrics WHERE node_id = $1::uuid`, nodeID); err != nil {
 		return fmt.Errorf("replace storage health metrics: %w", err)
 	}
@@ -261,16 +346,29 @@ func replaceStorageHealthMetrics(ctx context.Context, tx pgx.Tx, nodeID string, 
 		if !ok {
 			return fmt.Errorf("%w: block device %q", ErrInvalidResource, metric.BlockDeviceKey)
 		}
+		prior := previous[blockDeviceID]
+		sameBucket := !prior.BucketAt.IsZero() && prior.BucketAt.Equal(bucketAt)
+		eccDelta := storageCounterDelta(metric.SCSIECCCorrected, prior.SCSIECCCorrected, prior.SCSIECCCorrectedDelta, sameBucket)
+		nonMediumDelta := storageCounterDelta(metric.SCSINonMediumErrors, prior.SCSINonMediumErrors, prior.SCSINonMediumErrorsDelta, sameBucket)
+		if nonZeroCounter(eccDelta) {
+			addStorageWarning(&metric, "scsi_ecc_errors_increased")
+		}
+		if nonZeroCounter(nonMediumDelta) {
+			addStorageWarning(&metric, "scsi_non_medium_errors_increased")
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO monitoring.storage_health_current_metrics (
 				node_id, block_device_id, bucket_at, collected_at, received_at,
 				smart_available, smart_enabled, smart_status, risk_level, risk_reasons,
 				temperature_celsius, power_on_hours, error_count,
 				read_error_rate_normalized, read_error_rate_raw,
-				reallocated_sectors, pending_sectors, uncorrectable_sectors, percentage_used
+				reallocated_sectors, pending_sectors, uncorrectable_sectors,
+				scsi_grown_defects, scsi_ecc_corrected, scsi_ecc_corrected_delta,
+				scsi_non_medium_errors, scsi_non_medium_errors_delta, percentage_used
 			) VALUES (
 				$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
-				$11, $12, $13, $14, $15, $16, $17, $18, $19
+				$11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+				$21, $22, $23, $24
 			)
 		`, nodeID, blockDeviceID, bucketAt, collectedAt, receivedAt,
 			metric.SMARTAvailable, metric.SMARTEnabled, metric.SMARTStatus, metric.RiskLevel,
@@ -278,11 +376,90 @@ func replaceStorageHealthMetrics(ctx context.Context, tx pgx.Tx, nodeID string, 
 			nullableI64(metric.PowerOnHours), nullableI64(metric.ErrorCount),
 			nullableI64(metric.ReadErrorRateNormalized), nullableI64(metric.ReadErrorRateRaw),
 			nullableI64(metric.ReallocatedSectors), nullableI64(metric.PendingSectors),
-			nullableI64(metric.UncorrectableSectors), metric.PercentageUsed); err != nil {
+			nullableI64(metric.UncorrectableSectors), nullableI64(metric.SCSIGrownDefects),
+			nullableI64(metric.SCSIECCCorrected), nullableI64(eccDelta),
+			nullableI64(metric.SCSINonMediumErrors), nullableI64(nonMediumDelta),
+			metric.PercentageUsed); err != nil {
 			return fmt.Errorf("insert storage health metric %q: %w", metric.BlockDeviceKey, err)
 		}
 	}
 	return nil
+}
+
+type storageHealthCounters struct {
+	BucketAt                 time.Time
+	SCSIECCCorrected         *int64
+	SCSIECCCorrectedDelta    *int64
+	SCSINonMediumErrors      *int64
+	SCSINonMediumErrorsDelta *int64
+}
+
+func loadStorageHealthCounters(ctx context.Context, tx pgx.Tx, nodeID string) (map[string]storageHealthCounters, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT block_device_id::text, bucket_at,
+		       scsi_ecc_corrected, scsi_ecc_corrected_delta,
+		       scsi_non_medium_errors, scsi_non_medium_errors_delta
+		  FROM monitoring.storage_health_current_metrics
+		 WHERE node_id = $1::uuid
+	`, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("query previous storage health counters: %w", err)
+	}
+	defer rows.Close()
+	result := make(map[string]storageHealthCounters)
+	for rows.Next() {
+		var blockDeviceID string
+		var counters storageHealthCounters
+		if err := rows.Scan(
+			&blockDeviceID, &counters.BucketAt,
+			&counters.SCSIECCCorrected, &counters.SCSIECCCorrectedDelta,
+			&counters.SCSINonMediumErrors, &counters.SCSINonMediumErrorsDelta,
+		); err != nil {
+			return nil, fmt.Errorf("scan previous storage health counters: %w", err)
+		}
+		result[blockDeviceID] = counters
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate previous storage health counters: %w", err)
+	}
+	return result, nil
+}
+
+func storageCounterDelta(current *uint64, previous, previousDelta *int64, sameBucket bool) *uint64 {
+	if current == nil || previous == nil || *previous < 0 {
+		return nil
+	}
+	base := uint64(0)
+	if sameBucket && previousDelta != nil && *previousDelta >= 0 {
+		base = uint64(*previousDelta)
+	}
+	previousValue := uint64(*previous)
+	if *current < previousValue {
+		return &base
+	}
+	increase := *current - previousValue
+	if increase > math.MaxInt64-base {
+		return nil
+	}
+	delta := base + increase
+	return &delta
+}
+
+func addStorageWarning(metric *report.StorageHealth, reason string) {
+	for _, existing := range metric.RiskReasons {
+		if existing == reason {
+			return
+		}
+	}
+	metric.RiskReasons = append(metric.RiskReasons, reason)
+	sort.Strings(metric.RiskReasons)
+	if metric.RiskLevel != "critical" {
+		metric.RiskLevel = "warning"
+	}
+}
+
+func nonZeroCounter(value *uint64) bool {
+	return value != nil && *value > 0
 }
 
 const temperatureSnapshotFreshnessSQL = `
@@ -294,6 +471,12 @@ const temperatureSnapshotFreshnessSQL = `
 const storageHealthSnapshotFreshnessSQL = `
 	SELECT NOT EXISTS (
 		SELECT 1 FROM monitoring.storage_health_current_metrics
+		WHERE node_id = $1::uuid AND bucket_at > $2
+	)`
+
+const raidStatusSnapshotFreshnessSQL = `
+	SELECT NOT EXISTS (
+		SELECT 1 FROM monitoring.raid_status_current_snapshots
 		WHERE node_id = $1::uuid AND bucket_at > $2
 	)`
 
