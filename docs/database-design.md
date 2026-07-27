@@ -38,6 +38,7 @@ erDiagram
     GPU_DEVICES ||--o{ GPU_METRIC_HOURLY : rollup
     NODES ||--o{ TEMPERATURE_CURRENT_METRICS : latest
     BLOCK_DEVICES ||--o| STORAGE_HEALTH_CURRENT_METRICS : latest
+    NODES ||--o{ ALERT_EVENTS : raises
 ```
 
 硬盘型号、序列号和数量来自 `block_devices`；容量使用率来自 `filesystems`。二者刻意分开，以支持 LVM、RAID、一个文件系统跨设备以及同一设备多挂载等情况。
@@ -71,6 +72,7 @@ erDiagram
 | `raid_controller_current_metrics` | RAID 控制器型号、状态以及磁盘组、虚拟盘和物理盘数量 |
 | `raid_virtual_drive_current_metrics` | 虚拟盘 RAID 级别、状态、访问、一致性、缓存和容量 |
 | `raid_physical_drive_current_metrics` | 物理盘机箱/槽位、接口、介质、状态、磁盘组和重建进度 |
+| `alert_events` | 节点与资源告警的产生、持续、最高严重度和恢复时间 |
 
 每张清单表使用稳定 key 加 `first_seen_at`、`last_seen_at`、`removed_at` 记录观察周期。当前有效记录有局部唯一索引；设备移除后，相同 key 再次出现会创建新的历史记录。
 
@@ -91,6 +93,8 @@ NVIDIA GPU 由 Agent 调用 `nvidia-smi` 识别，以 GPU UUID 作为稳定清�
 历史 API 对 `1h`、`6h` 保留分钟点，`24h` 在数据库端按 5 分钟聚合，`7d`、`30d`、`90d` 使用小时汇总。节点、文件系统和网络历史先在限定节点与时间范围内分别聚合，再按时间桶关联，避免对每个节点时间点重复执行资源子查询。成功响应在中央服务内缓存 30 秒，相同节点与范围的并发请求会合并为一次数据库查询。
 
 硬件温度、SMART 和 RAID 控制器状态只保存最新快照，不进入分钟分区或小时汇总。SMART 错误数据区分 ATA `Raw_Read_Error_Rate` 的厂商标准化值/原始值，以及 ATA 错误日志、SAS 不可校正错误或 NVMe 介质错误形成的错误计数，避免把不同厂商的原始属性直接当作可比较百分比。SAS 还保存 grown defect、ECC 纠错和 non-medium 错误累计值；中心在替换 current 快照前与上一份已接收值比较，保存 ECC/non-medium 增量。首次出现或计数器回退只建立新基线，同一分钟重试保留此前已算出的增量。风险等级由 SMART 总体结果、smartctl 状态位、待映射/不可校正/重映射扇区、SAS grown defect、SAS ECC/non-medium 增量、NVMe 严重警告和寿命使用量确定。RAID 快照使用独立的节点级时间标记，即使最新快照为空，也不会被乱序旧上报重新填充。
+
+`alert_events` 使用 `(node_id, category, resource_key) WHERE resolved_at IS NULL` 部分唯一索引保证同一异常只有一个当前事件。严重度在事件持续期间只能从 `warning` 升至 `critical`；恢复后写入 `resolved_at`，同一资源再次异常会创建新事件。离线期间只评估离线告警，已有资源告警保持未恢复；节点恢复上报后再依据最新快照判断。禁用和待安装节点不会产生告警，并关闭已有告警。
 
 ## 上报事务
 
@@ -136,6 +140,8 @@ SELECT monitoring.rollup_hour($1::timestamptz);
 
 `rollup_hour` 使用 upsert，重复运行是安全的；当某资源的原始数据在重试中被删除时，对应的旧汇总也会清理。
 
+同一维护周期调用 `monitoring.prune_resolved_alert_events` 删除已恢复超过 365 天的告警。每分钟告警评估使用事务级 advisory lock，多个中心实例不会重复创建事件。
+
 ## 权限
 
 - `server_status_owner`：NOLOGIN，对 schema 和对象持有所有权。
@@ -146,7 +152,7 @@ SELECT monitoring.rollup_hour($1::timestamptz);
 
 ## 部署与验证
 
-迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好，`V005` 增加 NVIDIA GPU 清单和当前指标，`V006` 增加每节点最多 5 个管理员 Tag，`V007` 增加逐 GPU 分钟历史、小时汇总与 current 同步触发器，`V008` 增加 ARM 性能核与能效核拓扑，`V009` 增加温度与 SMART 当前快照，`V010` 增加 SAS 缺陷、ECC 与 non-medium 计数及增量，`V011` 增加 RAID 控制器、虚拟盘、物理盘和重建状态。在连接信息由环境或 `.pgpass` 提供的前提下执行：
+迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好，`V005` 增加 NVIDIA GPU 清单和当前指标，`V006` 增加每节点最多 5 个管理员 Tag，`V007` 增加逐 GPU 分钟历史、小时汇总与 current 同步触发器，`V008` 增加 ARM 性能核与能效核拓扑，`V009` 增加温度与 SMART 当前快照，`V010` 增加 SAS 缺陷、ECC 与 non-medium 计数及增量，`V011` 增加 RAID 控制器、虚拟盘、物理盘和重建状态，`V012` 增加持久化告警事件与清理函数。在连接信息由环境或 `.pgpass` 提供的前提下执行：
 
 ```bash
 psql -v ON_ERROR_STOP=1 -f db/migrations/V001__monitoring_schema.sql
@@ -160,7 +166,8 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V008__arm_cpu_core_topology.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V009__hardware_health_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V010__sas_health_counters.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V011__raid_controller_status.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V012__alert_events.sql
 psql -v ON_ERROR_STOP=1 -f db/verify/V001__verify.sql
 ```
 
-验收脚本会覆盖节点、令牌、Tag 数量约束、硬件历史、温度/SMART 当前快照、RAID 透传与控制器拓扑、多 GPU 当前/分钟/小时指标、IPv4/IPv6、首页网卡偏好、current 触发器、幂等更新、跨节点约束、小时汇总、角色权限和查询计划，最后执行 `ROLLBACK`，不会保留验证数据。
+验收脚本会覆盖节点、令牌、Tag 数量约束、硬件历史、温度/SMART 当前快照、RAID 透传与控制器拓扑、告警去重/升级/恢复/复发/保留期、多 GPU 当前/分钟/小时指标、IPv4/IPv6、首页网卡偏好、current 触发器、幂等更新、跨节点约束、小时汇总、角色权限和查询计划，最后执行 `ROLLBACK`，不会保留验证数据。

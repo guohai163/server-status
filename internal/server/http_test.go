@@ -36,6 +36,9 @@ type fakeStore struct {
 	historyErr                  error
 	historyCalls                atomic.Int32
 	historyDelay                time.Duration
+	alerts                      store.AlertList
+	alertsErr                   error
+	alertOptions                store.AlertListOptions
 }
 
 func (fake *fakeStore) Ready(context.Context) error { return nil }
@@ -86,6 +89,11 @@ func (fake *fakeStore) GetNodeHistory(ctx context.Context, _, _ string) (store.N
 		return store.NodeHistory{}, store.ErrNotFound
 	}
 	return fake.history, nil
+}
+
+func (fake *fakeStore) ListAlerts(_ context.Context, options store.AlertListOptions) (store.AlertList, error) {
+	fake.alertOptions = options
+	return fake.alerts, fake.alertsErr
 }
 
 func TestHealth(t *testing.T) {
@@ -281,6 +289,96 @@ func TestWebDashboardIsServed(t *testing.T) {
 	}
 	if !bytes.Contains(response.Body.Bytes(), []byte(`/assets/favicon.ico`)) {
 		t.Fatal("dashboard does not reference the favicon")
+	}
+	for _, fragment := range []string{`id="alerts-button"`, `href="/alerts"`, `target="_blank"`, `rel="noopener"`} {
+		if !bytes.Contains(response.Body.Bytes(), []byte(fragment)) {
+			t.Errorf("dashboard alert link does not contain %q", fragment)
+		}
+	}
+}
+
+func TestAlertPageAndScriptAreServed(t *testing.T) {
+	api, _ := testAPI()
+	for path, expected := range map[string][]string{
+		"/alerts":           {"告警日志", "alert-category-filter", "/assets/alerts.js"},
+		"/alerts/":          {"告警日志", "alerts-table-body"},
+		"/assets/alerts.js": {"/api/v1/alerts", "next_cursor", "30000", "data-alert-state"},
+	} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+		api.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s returned %d", path, response.Code)
+		}
+		for _, fragment := range expected {
+			if !strings.Contains(response.Body.String(), fragment) {
+				t.Errorf("GET %s does not contain %q", path, fragment)
+			}
+		}
+	}
+}
+
+func TestListAlertsDefaultsAndIsPublic(t *testing.T) {
+	api, database := testAPI()
+	database.alerts = store.AlertList{
+		Alerts:  []store.AlertEvent{{AlertID: "40000000-0000-4000-8000-000000000001", Severity: "critical"}},
+		Summary: store.AlertSummary{OpenTotal: 1, Critical: 1, AffectedNodes: 1},
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/alerts", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	if database.alertOptions.State != "open" || database.alertOptions.Since != nil || database.alertOptions.Limit != 0 {
+		t.Fatalf("unexpected default options: %#v", database.alertOptions)
+	}
+	if !strings.Contains(response.Body.String(), `"open_total":1`) {
+		t.Fatalf("response does not contain alert summary: %s", response.Body.String())
+	}
+}
+
+func TestListAlertsPassesFiltersAndHistoryRange(t *testing.T) {
+	api, database := testAPI()
+	before := time.Now().UTC().Add(-30 * 24 * time.Hour)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/alerts?state=resolved&category=smart&severity=warning&node_id=10000000-0000-4000-8000-000000000001&range=30d&limit=25&cursor=next", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	options := database.alertOptions
+	if options.State != "resolved" || options.Category != "smart" || options.Severity != "warning" || options.Limit != 25 || options.Cursor != "next" {
+		t.Fatalf("filters were not passed to store: %#v", options)
+	}
+	if options.Since == nil || options.Since.Before(before) || options.Since.After(time.Now().UTC().Add(-30*24*time.Hour+time.Second)) {
+		t.Fatalf("unexpected history start time: %v", options.Since)
+	}
+}
+
+func TestListAlertsRejectsInvalidParameters(t *testing.T) {
+	tests := []string{
+		"state=active", "category=memory", "severity=info", "node_id=bad", "state=resolved&range=all", "limit=0", "limit=201", "limit=many",
+	}
+	for _, query := range tests {
+		api, _ := testAPI()
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/alerts?"+query, nil)
+		response := httptest.NewRecorder()
+		api.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Errorf("query %q: expected 400, got %d", query, response.Code)
+		}
+	}
+}
+
+func TestListAlertsRejectsInvalidCursorFromStore(t *testing.T) {
+	api, database := testAPI()
+	database.alertsErr = store.ErrInvalidAlertQuery
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/alerts?cursor=bad", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", response.Code)
 	}
 }
 

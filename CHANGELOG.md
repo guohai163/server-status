@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v0.18.0 - 2026-07-27
+
+### Added
+- Persist offline, filesystem-capacity, normalized-load, SMART, RAID, and hardware-temperature alert lifecycles with severity escalation, recovery tracking, multi-instance evaluation locking, and 365-day resolved-event retention.
+- Add a public filtered and cursor-paginated alerts API plus a responsive current-alert and history page linked from the node dashboard.
+
+### Fixed
+- Request the smartctl background log for SCSI and SAS devices so supported disks can report values such as power-on hours.
+
 ## v0.17.0 - 2026-07-27
 
 ### Added

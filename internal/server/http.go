@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +39,7 @@ type dataStore interface {
 	SetPrimaryNetworkInterface(context.Context, string, string) error
 	UpdateNodeTags(context.Context, string, []string) error
 	GetNodeHistory(context.Context, string, string) (store.NodeHistory, error)
+	ListAlerts(context.Context, store.AlertListOptions) (store.AlertList, error)
 }
 
 func NewAPI(database dataStore, adminToken string, logger *slog.Logger, releaseCacheDir string) *API {
@@ -55,6 +57,7 @@ func NewAPI(database dataStore, adminToken string, logger *slog.Logger, releaseC
 	api.mux.HandleFunc("GET /readyz", api.ready)
 	api.mux.HandleFunc("POST /api/v1/reports", api.report)
 	api.mux.HandleFunc("GET /api/v1/nodes", api.listNodes)
+	api.mux.HandleFunc("GET /api/v1/alerts", api.listAlerts)
 	api.mux.HandleFunc("GET /api/v1/nodes/{nodeID}", api.getNode)
 	api.mux.HandleFunc("GET /api/v1/nodes/{nodeID}/history", api.getNodeHistory)
 	api.mux.HandleFunc("POST /api/v1/admin/nodes", api.requireAdmin(api.registerNode))
@@ -168,6 +171,90 @@ func (api *API) listNodes(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"nodes": nodes})
+}
+
+func (api *API) listAlerts(response http.ResponseWriter, request *http.Request) {
+	query := request.URL.Query()
+	options := store.AlertListOptions{
+		State:    query.Get("state"),
+		Category: query.Get("category"),
+		Severity: query.Get("severity"),
+		NodeID:   query.Get("node_id"),
+		Cursor:   query.Get("cursor"),
+	}
+	if options.State == "" {
+		options.State = "open"
+	}
+	if options.State != "open" && options.State != "resolved" && options.State != "all" {
+		writeError(response, http.StatusBadRequest, "state must be one of open, resolved, or all")
+		return
+	}
+	if options.Category != "" && !store.ValidAlertCategory(options.Category) {
+		writeError(response, http.StatusBadRequest, "invalid alert category")
+		return
+	}
+	if options.Severity != "" && !store.ValidAlertSeverity(options.Severity) {
+		writeError(response, http.StatusBadRequest, "severity must be warning or critical")
+		return
+	}
+	if options.NodeID != "" && !report.ValidUUID(options.NodeID) {
+		writeError(response, http.StatusBadRequest, "invalid node id")
+		return
+	}
+	if value := query.Get("limit"); value != "" {
+		limit, err := strconv.Atoi(value)
+		if err != nil || limit < 1 || limit > 200 {
+			writeError(response, http.StatusBadRequest, "limit must be between 1 and 200")
+			return
+		}
+		options.Limit = limit
+	}
+	window := query.Get("range")
+	if window != "" || options.State != "open" {
+		if window == "" {
+			window = "30d"
+		}
+		duration, ok := alertRangeDuration(window)
+		if !ok {
+			writeError(response, http.StatusBadRequest, "range must be one of 24h, 7d, 30d, 90d, or 365d")
+			return
+		}
+		if options.State != "open" {
+			since := time.Now().UTC().Add(-duration)
+			options.Since = &since
+		}
+	}
+
+	ctx, cancel := contextWithTimeout(request, 10*time.Second)
+	defer cancel()
+	alerts, err := api.store.ListAlerts(ctx, options)
+	if errors.Is(err, store.ErrInvalidAlertQuery) {
+		writeError(response, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		api.logger.Error("list alerts failed", "error", err)
+		writeError(response, http.StatusInternalServerError, "cannot list alerts")
+		return
+	}
+	writeJSON(response, http.StatusOK, alerts)
+}
+
+func alertRangeDuration(value string) (time.Duration, bool) {
+	switch value {
+	case "24h":
+		return 24 * time.Hour, true
+	case "7d":
+		return 7 * 24 * time.Hour, true
+	case "30d":
+		return 30 * 24 * time.Hour, true
+	case "90d":
+		return 90 * 24 * time.Hour, true
+	case "365d":
+		return 365 * 24 * time.Hour, true
+	default:
+		return 0, false
+	}
 }
 
 func (api *API) exportNodes(response http.ResponseWriter, request *http.Request) {

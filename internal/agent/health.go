@@ -128,11 +128,7 @@ func collectStorageHealth(ctx context.Context, smartctlPath string, inventory []
 			defer func() { <-semaphore }()
 			commandContext, commandCancel := context.WithTimeout(ctx, 12*time.Second)
 			defer commandCancel()
-			args := []string{"--all", "--json=o", "--nocheck=standby"}
-			if device.Type != "" {
-				args = append(args, "--device="+device.Type)
-			}
-			args = append(args, device.Name)
+			args := smartctlDeviceArgs(device)
 			deviceOutput, _ := exec.CommandContext(commandContext, smartctlPath, args...).Output()
 			document, err := parseSMARTDocument(deviceOutput)
 			if err == nil {
@@ -142,6 +138,18 @@ func collectStorageHealth(ctx context.Context, smartctlPath string, inventory []
 	}
 	group.Wait()
 	return mergeSMARTSamples(inventory, samples)
+}
+
+func smartctlDeviceArgs(device smartDevice) []string {
+	args := []string{"--all", "--json=o", "--nocheck=standby"}
+	protocol := strings.ToLower(strings.TrimSpace(device.Protocol))
+	if protocol == "scsi" || protocol == "sas" {
+		args = append(args, "--log=background")
+	}
+	if device.Type != "" {
+		args = append(args, "--device="+device.Type)
+	}
+	return append(args, device.Name)
 }
 
 func parseSMARTScan(data []byte) []smartDevice {

@@ -579,6 +579,136 @@ BEGIN
 END
 $assertions$;
 
+INSERT INTO monitoring.alert_events (
+    id, node_id, category, resource_key, severity, title, details,
+    opened_at, last_observed_at
+) VALUES (
+    'b0000000-0000-0000-0000-000000000001',
+    '10000000-0000-0000-0000-000000000001',
+    'filesystem', '70000000-0000-0000-0000-000000000001',
+    'warning', 'verify filesystem alert', '{"used_percent":91}',
+    CURRENT_TIMESTAMP - INTERVAL '10 minutes', CURRENT_TIMESTAMP - INTERVAL '10 minutes'
+);
+
+INSERT INTO monitoring.alert_events (
+    node_id, category, resource_key, severity, title, details,
+    opened_at, last_observed_at
+) VALUES (
+    '10000000-0000-0000-0000-000000000001',
+    'filesystem', '70000000-0000-0000-0000-000000000001',
+    'critical', 'verify filesystem alert', '{"used_percent":96}',
+    CURRENT_TIMESTAMP - INTERVAL '9 minutes', CURRENT_TIMESTAMP - INTERVAL '9 minutes'
+)
+ON CONFLICT (node_id, category, resource_key) WHERE resolved_at IS NULL
+DO UPDATE SET
+    severity = CASE
+        WHEN monitoring.alert_events.severity = 'critical' OR EXCLUDED.severity = 'critical' THEN 'critical'
+        ELSE 'warning'
+    END,
+    details = EXCLUDED.details,
+    last_observed_at = EXCLUDED.last_observed_at;
+
+UPDATE monitoring.alert_events
+   SET resolved_at = CURRENT_TIMESTAMP - INTERVAL '5 minutes'
+ WHERE id = 'b0000000-0000-0000-0000-000000000001';
+
+INSERT INTO monitoring.alert_events (
+    id, node_id, category, resource_key, severity, title,
+    opened_at, last_observed_at
+) VALUES (
+    'b0000000-0000-0000-0000-000000000002',
+    '10000000-0000-0000-0000-000000000001',
+    'filesystem', '70000000-0000-0000-0000-000000000001',
+    'warning', 'verify repeated filesystem alert',
+    CURRENT_TIMESTAMP - INTERVAL '2 minutes', CURRENT_TIMESTAMP - INTERVAL '2 minutes'
+), (
+    'b0000000-0000-0000-0000-000000000003',
+    '10000000-0000-0000-0000-000000000001',
+    'load', 'expired-resolved', 'warning', 'verify expired alert',
+    CURRENT_TIMESTAMP - INTERVAL '367 days', CURRENT_TIMESTAMP - INTERVAL '366 days'
+), (
+    'b0000000-0000-0000-0000-000000000004',
+    '10000000-0000-0000-0000-000000000001',
+    'load', 'old-open', 'critical', 'verify retained open alert',
+    CURRENT_TIMESTAMP - INTERVAL '400 days', CURRENT_TIMESTAMP - INTERVAL '1 minute'
+);
+
+UPDATE monitoring.alert_events
+   SET resolved_at = CURRENT_TIMESTAMP - INTERVAL '366 days'
+ WHERE id = 'b0000000-0000-0000-0000-000000000003';
+
+SELECT monitoring.prune_resolved_alert_events(CURRENT_TIMESTAMP);
+
+DO $alert_assertions$
+DECLARE
+    v_count integer;
+    v_severity text;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM monitoring.schema_migrations WHERE version = 'V012') THEN
+        RAISE EXCEPTION 'V012 migration history entry is missing';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_index
+         WHERE indexrelid = 'monitoring.alert_events_open_resource_uq'::regclass
+           AND indisunique
+           AND indpred IS NOT NULL
+    ) THEN
+        RAISE EXCEPTION 'open-alert partial unique index is missing';
+    END IF;
+
+    SELECT count(*), max(severity)
+      INTO v_count, v_severity
+      FROM monitoring.alert_events
+     WHERE node_id = '10000000-0000-0000-0000-000000000001'
+       AND category = 'filesystem'
+       AND resource_key = '70000000-0000-0000-0000-000000000001';
+    IF v_count <> 2 OR v_severity <> 'critical' THEN
+        RAISE EXCEPTION 'alert deduplication, upgrade, recovery, or recurrence failed';
+    END IF;
+    SELECT count(*) INTO v_count
+      FROM monitoring.alert_events
+     WHERE node_id = '10000000-0000-0000-0000-000000000001'
+       AND category = 'filesystem'
+       AND resource_key = '70000000-0000-0000-0000-000000000001'
+       AND resolved_at IS NULL;
+    IF v_count <> 1 THEN
+        RAISE EXCEPTION 'repeated alert occurrence did not leave exactly one open event';
+    END IF;
+    IF EXISTS (SELECT 1 FROM monitoring.alert_events WHERE id = 'b0000000-0000-0000-0000-000000000003') THEN
+        RAISE EXCEPTION 'expired resolved alert was not pruned';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM monitoring.alert_events WHERE id = 'b0000000-0000-0000-0000-000000000004') THEN
+        RAISE EXCEPTION 'open alert was incorrectly pruned';
+    END IF;
+
+    BEGIN
+        INSERT INTO monitoring.alert_events (
+            node_id, category, resource_key, severity, title, opened_at, last_observed_at
+        ) VALUES (
+            '10000000-0000-0000-0000-000000000001',
+            'filesystem', '70000000-0000-0000-0000-000000000001',
+            'warning', 'duplicate open alert', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        );
+        RAISE EXCEPTION 'duplicate open alert was accepted';
+    EXCEPTION WHEN unique_violation THEN
+        NULL;
+    END;
+
+    BEGIN
+        INSERT INTO monitoring.alert_events (
+            node_id, category, resource_key, severity, title, opened_at, last_observed_at
+        ) VALUES (
+            '10000000-0000-0000-0000-000000000001',
+            'memory', 'node', 'warning', 'invalid category', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        );
+        RAISE EXCEPTION 'invalid alert category was accepted';
+    EXCEPTION WHEN check_violation THEN
+        NULL;
+    END;
+END
+$alert_assertions$;
+
 SELECT monitoring.rollup_hour(date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '1 hour');
 
 DO $rollup_assertions$
@@ -703,6 +833,11 @@ BEGIN
        NOT has_table_privilege('server_status_writer', 'monitoring.raid_physical_drive_current_metrics', 'INSERT') THEN
         RAISE EXCEPTION 'writer role lacks INSERT on RAID status tables';
     END IF;
+    IF NOT has_table_privilege('server_status_writer', 'monitoring.alert_events', 'INSERT') OR
+       NOT has_table_privilege('server_status_writer', 'monitoring.alert_events', 'UPDATE') OR
+       NOT has_function_privilege('server_status_writer', 'monitoring.prune_resolved_alert_events(timestamptz)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'writer role lacks alert lifecycle privileges';
+    END IF;
     IF has_table_privilege('server_status_reader', 'monitoring.gpu_metric_samples', 'INSERT') THEN
         RAISE EXCEPTION 'reader role can modify GPU raw metrics';
     END IF;
@@ -715,6 +850,11 @@ BEGIN
        has_table_privilege('server_status_reader', 'monitoring.raid_virtual_drive_current_metrics', 'INSERT') OR
        has_table_privilege('server_status_reader', 'monitoring.raid_physical_drive_current_metrics', 'INSERT') THEN
         RAISE EXCEPTION 'reader role can modify RAID status tables';
+    END IF;
+    IF has_table_privilege('server_status_reader', 'monitoring.alert_events', 'INSERT') OR
+       NOT has_table_privilege('server_status_reader', 'monitoring.alert_events', 'SELECT') OR
+       has_function_privilege('server_status_reader', 'monitoring.prune_resolved_alert_events(timestamptz)', 'EXECUTE') THEN
+        RAISE EXCEPTION 'reader role alert privileges are incorrect';
     END IF;
     IF has_table_privilege('server_status_reader', 'monitoring.node_network_preferences', 'INSERT') THEN
         RAISE EXCEPTION 'reader role can modify dashboard network preferences';
@@ -768,6 +908,15 @@ INSERT INTO monitoring.node_metric_samples (
     12.5, 1000, 200, 700, 50, 10, 0, 0, 1
 );
 
+INSERT INTO monitoring.alert_events (
+    node_id, category, resource_key, severity, title, opened_at, last_observed_at
+) VALUES (
+    '10000000-0000-0000-0000-000000000003',
+    'offline', 'node', 'critical', 'writer role alert', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+);
+
+SELECT monitoring.prune_resolved_alert_events(CURRENT_TIMESTAMP);
+
 RESET ROLE;
 
 DO $writer_runtime_assertions$
@@ -795,6 +944,15 @@ BEGIN
            AND tags = ARRAY['writer-managed']
     ) THEN
         RAISE EXCEPTION 'writer role could not update node tags';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+          FROM monitoring.alert_events
+         WHERE node_id = '10000000-0000-0000-0000-000000000003'
+           AND category = 'offline'
+           AND resolved_at IS NULL
+    ) THEN
+        RAISE EXCEPTION 'writer role could not persist alerts';
     END IF;
 END
 $writer_runtime_assertions$;

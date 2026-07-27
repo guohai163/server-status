@@ -45,6 +45,7 @@ func main() {
 		serverErrors <- httpServer.ListenAndServe()
 	}()
 	go appserver.RunMaintenance(ctx, database, logger)
+	go appserver.RunAlertEvaluation(ctx, database, logger)
 
 	select {
 	case <-ctx.Done():

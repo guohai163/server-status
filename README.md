@@ -76,8 +76,11 @@ flowchart TD
     M --> N["触发器更新 current 表"]
     N --> O["提交事务并返回 202 Accepted"]
     O --> P["公开状态 API / Web 仪表盘查询"]
-    Q["每小时后台任务"] --> R["小时汇总、预建分区、清理过期分区"]
+    Q["每分钟告警评估"] --> S["产生、更新或恢复告警事件"]
     L --> Q
+    Q --> P
+    T["每小时后台任务"] --> R["小时汇总、预建分区、清理过期数据"]
+    L --> T
 ```
 
 ## 数据保留与状态
@@ -86,6 +89,7 @@ flowchart TD
 - 小时汇总：按 UTC 月分区，保留 24 个月。
 - 当前状态：每个节点、文件系统、网卡或 GPU 只保留一条最新记录，列表查询不扫描历史表。
 - 连续 3 分钟没有成功上报的节点显示为 `offline`。
+- 告警事件：离线、文件系统容量、负载、SMART、RAID 和温度异常按事件持续记录；已恢复事件保留 365 天，未恢复事件不清理。
 - 中心接受最多 24 小时的延迟数据，拒绝超过当前时间 5 分钟的未来数据。
 
 详细表结构见 [docs/database-design.md](docs/database-design.md)。
@@ -161,6 +165,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V008__arm_cpu_core_topology.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V009__hardware_health_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V010__sas_health_counters.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V011__raid_controller_status.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V012__alert_events.sql
 ```
 
 中央服务应使用继承 `server_status_writer` 的独立登录角色，不要使用 PostgreSQL 超级用户。
@@ -243,10 +248,12 @@ macOS 节点在“添加节点”中选择 `macOS 11 及以上`。生成的命�
 | `GET` | `/healthz` | 无 | 检查中心进程存活 |
 | `GET` | `/readyz` | 无 | 检查数据库和迁移就绪 |
 | `GET` | `/` | 无 | Web 节点状态看板 |
+| `GET` | `/alerts` | 无 | 当前告警与历史记录页面 |
 | `GET` | `/install-agent.sh` | 无 | 获取无凭据的 Agent 安装器 |
 | `GET` | `/install-agent-macos.sh` | 无 | 获取无凭据的 macOS Agent 安装器 |
 | `GET` | `/agent/releases/{version}/{asset}` | 无 | 获取中心校验并缓存的 Agent Release 资产 |
 | `GET` | `/api/v1/nodes` | 无 | 查询所有节点最新卡片数据 |
+| `GET` | `/api/v1/alerts?state=open` | 无 | 查询告警；支持 `state/category/severity/node_id/range/limit/cursor`，历史范围为 `24h/7d/30d/90d/365d` |
 | `GET` | `/api/v1/nodes/{node_id}` | 无 | 查询节点完整硬件与运行状态 |
 | `GET` | `/api/v1/nodes/{node_id}/history?range=24h` | 无 | 查询 `1h/6h/24h/7d/30d/90d` 历史趋势；24h 为 5 分钟、7d 以上为小时分辨率 |
 | `POST` | `/api/v1/reports` | Node Token | 接收一分钟快照，并在需要时返回固定版本 Agent 更新指令 |

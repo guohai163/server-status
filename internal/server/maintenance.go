@@ -37,5 +37,10 @@ func runMaintenanceCycle(ctx context.Context, database *store.Store, logger *slo
 			return
 		}
 	}
-	logger.Info("database maintenance completed", "through_hour", currentHour.Add(-time.Hour))
+	deletedAlerts, err := database.PruneResolvedAlerts(cycleCtx, currentHour)
+	if err != nil {
+		logger.Error("alert retention cleanup failed", "error", err)
+		return
+	}
+	logger.Info("database maintenance completed", "through_hour", currentHour.Add(-time.Hour), "resolved_alerts_deleted", deletedAlerts)
 }

@@ -19,6 +19,20 @@ func (api *API) registerWebRoutes() {
 		panic(err)
 	}
 	api.mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assets))))
+	servePage := func(name string) http.HandlerFunc {
+		return func(response http.ResponseWriter, _ *http.Request) {
+			content, err := fs.ReadFile(root, name)
+			if err != nil {
+				http.Error(response, "web application is unavailable", http.StatusInternalServerError)
+				return
+			}
+			response.Header().Set("Content-Type", "text/html; charset=utf-8")
+			response.Header().Set("Cache-Control", "no-cache")
+			_, _ = response.Write(content)
+		}
+	}
+	api.mux.HandleFunc("GET /alerts", servePage("alerts.html"))
+	api.mux.HandleFunc("GET /alerts/", servePage("alerts.html"))
 	api.mux.HandleFunc("GET /install-agent.sh", func(response http.ResponseWriter, _ *http.Request) {
 		content, err := fs.ReadFile(root, "install-agent.sh")
 		if err != nil {
@@ -44,13 +58,6 @@ func (api *API) registerWebRoutes() {
 			http.NotFound(response, request)
 			return
 		}
-		content, err := fs.ReadFile(root, "index.html")
-		if err != nil {
-			http.Error(response, "web application is unavailable", http.StatusInternalServerError)
-			return
-		}
-		response.Header().Set("Content-Type", "text/html; charset=utf-8")
-		response.Header().Set("Cache-Control", "no-cache")
-		_, _ = response.Write(content)
+		servePage("index.html")(response, request)
 	})
 }

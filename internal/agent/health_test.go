@@ -3,6 +3,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -16,6 +17,38 @@ func TestParseSMARTScanIncludesRAIDPassthroughDevices(t *testing.T) {
 }`))
 	if len(devices) != 3 || devices[1].Type != "megaraid,0" || devices[2].Type != "megaraid,1" {
 		t.Fatalf("unexpected SMART scan: %+v", devices)
+	}
+}
+
+func TestSMARTCTLDeviceArgsIncludeBackgroundLogForSCSIAndSAS(t *testing.T) {
+	tests := []struct {
+		name     string
+		device   smartDevice
+		expected []string
+	}{
+		{
+			name:     "SCSI RAID passthrough",
+			device:   smartDevice{Name: "/dev/bus/0", Type: "megaraid,10", Protocol: "SCSI"},
+			expected: []string{"--all", "--json=o", "--nocheck=standby", "--log=background", "--device=megaraid,10", "/dev/bus/0"},
+		},
+		{
+			name:     "SAS protocol",
+			device:   smartDevice{Name: "/dev/sda", Protocol: " sas "},
+			expected: []string{"--all", "--json=o", "--nocheck=standby", "--log=background", "/dev/sda"},
+		},
+		{
+			name:     "ATA device",
+			device:   smartDevice{Name: "/dev/sdb", Type: "sat", Protocol: "ATA"},
+			expected: []string{"--all", "--json=o", "--nocheck=standby", "--device=sat", "/dev/sdb"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if args := smartctlDeviceArgs(test.device); !reflect.DeepEqual(args, test.expected) {
+				t.Fatalf("unexpected smartctl arguments: got %q, want %q", args, test.expected)
+			}
+		})
 	}
 }
 

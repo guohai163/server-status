@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>告警日志 · Server Status</title>
+  <link rel="icon" href="/assets/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/" aria-label="返回节点状态">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span><strong>Server Status</strong><small>告警日志</small></span>
+      </a>
+      <div class="topbar-actions">
+        <span id="alerts-updated-at" class="updated-at"></span>
+        <a class="secondary-button alerts-home-link" href="/">节点状态</a>
+        <button id="alerts-refresh-button" class="icon-button" type="button" title="刷新告警" aria-label="刷新告警">↻</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-shell alerts-shell">
+    <div class="page-heading alerts-heading">
+      <div>
+        <h1>告警日志</h1>
+        <p id="alerts-heading-copy">正在读取当前告警</p>
+      </div>
+      <div class="segmented alerts-state-tabs" role="tablist" aria-label="告警状态">
+        <button class="range-button active" type="button" role="tab" aria-selected="true" data-alert-state="open">当前告警</button>
+        <button class="range-button" type="button" role="tab" aria-selected="false" data-alert-state="resolved">历史记录</button>
+      </div>
+    </div>
+
+    <section class="alert-summary" aria-label="当前告警汇总">
+      <div class="alert-summary-item critical"><span>当前严重</span><strong id="summary-critical">--</strong></div>
+      <div class="alert-summary-item warning"><span>当前警告</span><strong id="summary-warning">--</strong></div>
+      <div class="alert-summary-item affected"><span>受影响节点</span><strong id="summary-affected">--</strong></div>
+      <div class="alert-summary-item total"><span>告警总数</span><strong id="summary-total">--</strong></div>
+    </section>
+
+    <section class="alert-controls" aria-label="告警筛选">
+      <label class="alert-filter"><span>分类</span><select id="alert-category-filter">
+        <option value="">全部分类</option>
+        <option value="offline">离线</option>
+        <option value="filesystem">文件系统容量</option>
+        <option value="load">系统负载</option>
+        <option value="smart">SMART</option>
+        <option value="raid">RAID</option>
+        <option value="temperature">硬件温度</option>
+      </select></label>
+      <label class="alert-filter"><span>级别</span><select id="alert-severity-filter">
+        <option value="">全部级别</option>
+        <option value="critical">严重</option>
+        <option value="warning">警告</option>
+      </select></label>
+      <label class="alert-filter alert-node-filter"><span>节点</span><select id="alert-node-filter"><option value="">全部节点</option></select></label>
+      <label id="alert-range-field" class="alert-filter" hidden><span>时间</span><select id="alert-range-filter">
+        <option value="24h">24 小时</option>
+        <option value="7d">7 天</option>
+        <option value="30d" selected>30 天</option>
+        <option value="90d">90 天</option>
+        <option value="365d">365 天</option>
+      </select></label>
+    </section>
+
+    <section class="alert-results" aria-live="polite" aria-busy="true">
+      <div id="alerts-status" class="alerts-feedback"><span class="spinner"></span><span>正在读取告警</span></div>
+      <div id="alerts-table-wrap" class="alert-table-wrap" hidden>
+        <table class="alert-table">
+          <thead><tr><th>级别</th><th>节点</th><th>分类 / 资源</th><th>当前值 / 状态</th><th>开始时间</th><th>持续时间</th><th>恢复时间</th></tr></thead>
+          <tbody id="alerts-table-body"></tbody>
+        </table>
+      </div>
+      <div class="alert-load-more"><button id="alerts-load-more" class="secondary-button" type="button" hidden>加载更多</button></div>
+    </section>
+  </main>
+  <script src="/assets/alerts.js" defer></script>
+</body>
+</html>
