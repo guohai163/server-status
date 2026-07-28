@@ -24,6 +24,8 @@ type fakeStore struct {
 	auth                        store.NodeAuth
 	ingested                    bool
 	registered                  bool
+	homepageSummary             store.HomepageSummary
+	homepageSummaryErr          error
 	nodes                       []store.NodeSummary
 	nodeDetails                 map[string]store.NodeDetail
 	primaryNetworkNodeID        string
@@ -55,6 +57,9 @@ func (fake *fakeStore) RegisterNode(context.Context, store.RegisterNodeInput) (s
 }
 func (fake *fakeStore) ListNodes(context.Context) ([]store.NodeSummary, error) {
 	return fake.nodes, nil
+}
+func (fake *fakeStore) GetHomepageSummary(context.Context) (store.HomepageSummary, error) {
+	return fake.homepageSummary, fake.homepageSummaryErr
 }
 
 func (fake *fakeStore) GetNode(_ context.Context, nodeID string) (store.NodeDetail, error) {
@@ -205,6 +210,24 @@ func TestPublicNodeListDoesNotRequireAuthentication(t *testing.T) {
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected public list to return 200, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestHomepageSummaryIsPublicAndReturnsCounts(t *testing.T) {
+	api, database := testAPI()
+	database.homepageSummary = store.HomepageSummary{Normal: 8, Offline: 2, Alerts: 1}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/homepage", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var payload store.HomepageSummary
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload != database.homepageSummary {
+		t.Fatalf("unexpected Homepage summary: %+v", payload)
 	}
 }
 

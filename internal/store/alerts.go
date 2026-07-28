@@ -75,6 +75,40 @@ type AlertList struct {
 	NextCursor string       `json:"next_cursor,omitempty"`
 }
 
+type HomepageSummary struct {
+	Normal  int `json:"normal"`
+	Offline int `json:"offline"`
+	Alerts  int `json:"alerts"`
+}
+
+func (store *Store) GetHomepageSummary(ctx context.Context) (HomepageSummary, error) {
+	var summary HomepageSummary
+	if err := store.pool.QueryRow(ctx, homepageSummarySQL).Scan(&summary.Normal, &summary.Offline, &summary.Alerts); err != nil {
+		return HomepageSummary{}, fmt.Errorf("query Homepage summary: %w", err)
+	}
+	return summary, nil
+}
+
+const homepageSummarySQL = `
+	WITH monitored_nodes AS (
+		SELECT
+			status.latest_bucket_at,
+			status.status,
+			EXISTS (
+				SELECT 1
+				  FROM monitoring.alert_events alert
+				 WHERE alert.node_id = status.node_id
+				   AND alert.resolved_at IS NULL
+				   AND alert.category <> 'offline'
+			) AS alerting
+		  FROM monitoring.v_node_status status
+	)
+	SELECT
+		count(*) FILTER (WHERE latest_bucket_at IS NOT NULL AND status = 'online' AND NOT alerting)::integer,
+		count(*) FILTER (WHERE latest_bucket_at IS NOT NULL AND status = 'offline')::integer,
+		count(*) FILTER (WHERE latest_bucket_at IS NOT NULL AND status = 'online' AND alerting)::integer
+	  FROM monitored_nodes`
+
 type alertCursor struct {
 	OpenedAt time.Time `json:"opened_at"`
 	AlertID  string    `json:"alert_id"`

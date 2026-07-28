@@ -34,6 +34,7 @@ type dataStore interface {
 	AuthenticateToken(context.Context, string) (store.NodeAuth, error)
 	Ingest(context.Context, store.NodeAuth, report.Report) error
 	RegisterNode(context.Context, store.RegisterNodeInput) (store.NodeCredentials, error)
+	GetHomepageSummary(context.Context) (store.HomepageSummary, error)
 	ListNodes(context.Context) ([]store.NodeSummary, error)
 	GetNode(context.Context, string) (store.NodeDetail, error)
 	SetPrimaryNetworkInterface(context.Context, string, string) error
@@ -56,6 +57,7 @@ func NewAPI(database dataStore, adminToken string, logger *slog.Logger, releaseC
 	api.mux.HandleFunc("GET /healthz", api.health)
 	api.mux.HandleFunc("GET /readyz", api.ready)
 	api.mux.HandleFunc("POST /api/v1/reports", api.report)
+	api.mux.HandleFunc("GET /api/v1/homepage", api.homepageSummary)
 	api.mux.HandleFunc("GET /api/v1/nodes", api.listNodes)
 	api.mux.HandleFunc("GET /api/v1/alerts", api.listAlerts)
 	api.mux.HandleFunc("GET /api/v1/nodes/{nodeID}", api.getNode)
@@ -255,6 +257,18 @@ func alertRangeDuration(value string) (time.Duration, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func (api *API) homepageSummary(response http.ResponseWriter, request *http.Request) {
+	ctx, cancel := contextWithTimeout(request, 5*time.Second)
+	defer cancel()
+	summary, err := api.store.GetHomepageSummary(ctx)
+	if err != nil {
+		api.logger.Error("get Homepage summary failed", "error", err)
+		writeError(response, http.StatusInternalServerError, "cannot get Homepage summary")
+		return
+	}
+	writeJSON(response, http.StatusOK, summary)
 }
 
 func (api *API) exportNodes(response http.ResponseWriter, request *http.Request) {

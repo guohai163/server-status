@@ -252,6 +252,7 @@ macOS 节点在“添加节点”中选择 `macOS 11 及以上`。生成的命�
 | `GET` | `/install-agent.sh` | 无 | 获取无凭据的 Agent 安装器 |
 | `GET` | `/install-agent-macos.sh` | 无 | 获取无凭据的 macOS Agent 安装器 |
 | `GET` | `/agent/releases/{version}/{asset}` | 无 | 获取中心校验并缓存的 Agent Release 资产 |
+| `GET` | `/api/v1/homepage` | 无 | 为 Homepage Custom API 返回正常、离线和异常告警服务器数量；配置见 [Homepage 文档](docs/homepage.md) |
 | `GET` | `/api/v1/nodes` | 无 | 查询所有节点最新卡片数据 |
 | `GET` | `/api/v1/alerts?state=open` | 无 | 查询告警；支持 `state/category/severity/node_id/range/limit/cursor`，历史范围为 `24h/7d/30d/90d/365d` |
 | `GET` | `/api/v1/nodes/{node_id}` | 无 | 查询节点完整硬件与运行状态 |

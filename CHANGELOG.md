@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v0.19.0 - 2026-07-28
+
+### Added
+- Add a public Homepage Custom API summary for normal, offline, and alerting server counts, backed by current node status and persistent alert events, with standalone configuration documentation.
+
 ## v0.18.0 - 2026-07-27
 
 ### Added

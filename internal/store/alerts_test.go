@@ -1,9 +1,27 @@
 package store
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestHomepageSummaryQueryUsesNodeStatusAndOpenAlerts(t *testing.T) {
+	for _, fragment := range []string{
+		"monitoring.v_node_status",
+		"monitoring.alert_events",
+		"alert.resolved_at IS NULL",
+		"alert.category <> 'offline'",
+		"latest_bucket_at IS NOT NULL",
+		"status = 'online' AND NOT alerting",
+		"status = 'offline'",
+		"status = 'online' AND alerting",
+	} {
+		if !strings.Contains(homepageSummarySQL, fragment) {
+			t.Errorf("Homepage summary query does not contain %q", fragment)
+		}
+	}
+}
 
 func TestThresholdAlertSeverityBoundaries(t *testing.T) {
 	tests := []struct {
