@@ -86,14 +86,25 @@ func (store *Store) Ready(ctx context.Context) error {
 	var exists bool
 	err := store.pool.QueryRow(ctx, `
 		SELECT EXISTS (
-			SELECT 1 FROM monitoring.schema_migrations WHERE version = 'V012'
+			SELECT 1 FROM monitoring.schema_migrations WHERE version = 'V013'
 		)
 	`).Scan(&exists)
 	if err != nil {
 		return fmt.Errorf("check database schema: %w", err)
 	}
 	if !exists {
-		return errors.New("database schema migration V012 is not installed")
+		return errors.New("database schema migration V013 is not installed")
+	}
+	return nil
+}
+
+func (store *Store) DeleteNode(ctx context.Context, nodeID string) error {
+	command, err := store.pool.Exec(ctx, `DELETE FROM monitoring.nodes WHERE id = $1::uuid`, nodeID)
+	if err != nil {
+		return fmt.Errorf("delete node: %w", err)
+	}
+	if command.RowsAffected() == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

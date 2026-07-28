@@ -162,7 +162,7 @@ button { color: inherit; }
 .status-dot.pending { background: var(--amber); }
 .status-dot.disabled { background: var(--quiet); }
 
-.command-button, .primary-button, .secondary-button {
+.command-button, .primary-button, .secondary-button, .danger-button {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -179,9 +179,11 @@ button { color: inherit; }
 .command-button:hover, .primary-button:hover { border-color: var(--primary-hover); background: var(--primary-hover); }
 .secondary-button { border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
 .secondary-button:hover { border-color: var(--control-line-hover); background: var(--surface-hover); }
-.command-button:focus-visible, .primary-button:focus-visible, .secondary-button:focus-visible,
+.danger-button { border: 1px solid var(--red); background: transparent; color: var(--red); }
+.danger-button:hover { background: var(--error-bg); }
+.command-button:focus-visible, .primary-button:focus-visible, .secondary-button:focus-visible, .danger-button:focus-visible,
 .field input:focus-visible, .field select:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
-.command-button:disabled, .primary-button:disabled, .secondary-button:disabled { cursor: wait; opacity: .65; }
+.command-button:disabled, .primary-button:disabled, .secondary-button:disabled, .danger-button:disabled { cursor: wait; opacity: .65; }
 
 .node-groups { display: grid; gap: 30px; }
 .node-group { min-width: 0; }
@@ -387,6 +389,7 @@ button { color: inherit; }
 .dialog-head p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
 .preference-form { display: grid; gap: 16px; padding: 22px; }
 .preference-form .form-error, .preference-form .dialog-actions { grid-column: 1; }
+.delete-warning { margin: 0; padding: 11px 12px; border-left: 3px solid var(--red); background: var(--error-bg); color: var(--error-text); font-size: 12px; line-height: 18px; }
 .tag-input-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 20px 22px; border-bottom: 1px solid var(--line); }
 .dialog-head h2 { margin: 0; font-size: 18px; line-height: 26px; letter-spacing: 0; }

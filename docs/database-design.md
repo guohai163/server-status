@@ -152,7 +152,7 @@ SELECT monitoring.rollup_hour($1::timestamptz);
 
 ## 部署与验证
 
-迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好，`V005` 增加 NVIDIA GPU 清单和当前指标，`V006` 增加每节点最多 5 个管理员 Tag，`V007` 增加逐 GPU 分钟历史、小时汇总与 current 同步触发器，`V008` 增加 ARM 性能核与能效核拓扑，`V009` 增加温度与 SMART 当前快照，`V010` 增加 SAS 缺陷、ECC 与 non-medium 计数及增量，`V011` 增加 RAID 控制器、虚拟盘、物理盘和重建状态，`V012` 增加持久化告警事件与清理函数。在连接信息由环境或 `.pgpass` 提供的前提下执行：
+迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好，`V005` 增加 NVIDIA GPU 清单和当前指标，`V006` 增加每节点最多 5 个管理员 Tag，`V007` 增加逐 GPU 分钟历史、小时汇总与 current 同步触发器，`V008` 增加 ARM 性能核与能效核拓扑，`V009` 增加温度与 SMART 当前快照，`V010` 增加 SAS 缺陷、ECC 与 non-medium 计数及增量，`V011` 增加 RAID 控制器、虚拟盘、物理盘和重建状态，`V012` 增加持久化告警事件与清理函数，`V013` 修正资源历史外键，使节点及其全部关联记录可完整级联删除。在连接信息由环境或 `.pgpass` 提供的前提下执行：
 
 ```bash
 psql -v ON_ERROR_STOP=1 -f db/migrations/V001__monitoring_schema.sql
@@ -167,6 +167,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V009__hardware_health_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V010__sas_health_counters.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V011__raid_controller_status.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V012__alert_events.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V013__cascade_node_deletion.sql
 psql -v ON_ERROR_STOP=1 -f db/verify/V001__verify.sql
 ```
 

@@ -37,6 +37,7 @@ type dataStore interface {
 	GetHomepageSummary(context.Context) (store.HomepageSummary, error)
 	ListNodes(context.Context) ([]store.NodeSummary, error)
 	GetNode(context.Context, string) (store.NodeDetail, error)
+	DeleteNode(context.Context, string) error
 	SetPrimaryNetworkInterface(context.Context, string, string) error
 	UpdateNodeTags(context.Context, string, []string) error
 	GetNodeHistory(context.Context, string, string) (store.NodeHistory, error)
@@ -66,6 +67,7 @@ func NewAPI(database dataStore, adminToken string, logger *slog.Logger, releaseC
 	api.mux.HandleFunc("GET /api/v1/admin/nodes", api.requireAdmin(api.listNodes))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes/export", api.requireAdmin(api.exportNodes))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes/{nodeID}", api.requireAdmin(api.getNode))
+	api.mux.HandleFunc("DELETE /api/v1/admin/nodes/{nodeID}", api.requireAdmin(api.deleteNode))
 	api.mux.HandleFunc("PUT /api/v1/admin/nodes/{nodeID}/primary-network-interface", api.requireAdmin(api.setPrimaryNetworkInterface))
 	api.mux.HandleFunc("PUT /api/v1/admin/nodes/{nodeID}/tags", api.requireAdmin(api.updateNodeTags))
 	api.mux.HandleFunc("GET /agent/releases/{version}/{asset}", api.releaseAsset)
@@ -327,6 +329,25 @@ func (api *API) getNode(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(response, http.StatusOK, detail)
+}
+
+func (api *API) deleteNode(response http.ResponseWriter, request *http.Request) {
+	nodeID := request.PathValue("nodeID")
+	if !report.ValidUUID(nodeID) {
+		writeError(response, http.StatusBadRequest, "invalid node id")
+		return
+	}
+	ctx, cancel := contextWithTimeout(request, 30*time.Second)
+	defer cancel()
+	if err := api.store.DeleteNode(ctx, nodeID); errors.Is(err, store.ErrNotFound) {
+		writeError(response, http.StatusNotFound, "node not found")
+		return
+	} else if err != nil {
+		api.logger.Error("delete node failed", "node_id", nodeID, "error", err)
+		writeError(response, http.StatusInternalServerError, "cannot delete node")
+		return
+	}
+	response.WriteHeader(http.StatusNoContent)
 }
 
 type primaryNetworkInterfaceInput struct {

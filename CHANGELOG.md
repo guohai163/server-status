@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v0.20.0 - 2026-07-28
+
+### Added
+- Add Admin Token-protected node deletion to the detail page and API, including complete cascading cleanup of credentials, inventory, metrics, and alerts.
+
 ## v0.19.0 - 2026-07-28
 
 ### Added

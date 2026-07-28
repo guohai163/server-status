@@ -964,4 +964,76 @@ SELECT bucket_at, cpu_usage_percent
    AND bucket_at >= date_trunc('hour', CURRENT_TIMESTAMP) - INTERVAL '1 hour'
    AND bucket_at < date_trunc('hour', CURRENT_TIMESTAMP);
 
+DO $node_delete_constraint_assertions$
+DECLARE
+    v_cascade_count integer;
+BEGIN
+    SELECT count(*)
+      INTO v_cascade_count
+      FROM pg_catalog.pg_constraint
+     WHERE conname IN (
+               'filesystem_metric_samples_node_id_filesystem_id_fkey',
+               'network_metric_samples_node_id_interface_id_fkey',
+               'filesystem_metric_hourly_node_id_filesystem_id_fkey',
+               'network_metric_hourly_node_id_interface_id_fkey',
+               'gpu_metric_samples_node_id_gpu_id_fkey',
+               'gpu_metric_hourly_node_id_gpu_id_fkey'
+           )
+       AND conrelid IN (
+               'monitoring.filesystem_metric_samples'::regclass,
+               'monitoring.network_metric_samples'::regclass,
+               'monitoring.filesystem_metric_hourly'::regclass,
+               'monitoring.network_metric_hourly'::regclass,
+               'monitoring.gpu_metric_samples'::regclass,
+               'monitoring.gpu_metric_hourly'::regclass
+           )
+       AND confdeltype = 'c';
+    IF v_cascade_count <> 6 THEN
+        RAISE EXCEPTION 'node deletion resource history constraints are incomplete: expected 6, got %', v_cascade_count;
+    END IF;
+END
+$node_delete_constraint_assertions$;
+
+SET LOCAL ROLE server_status_writer;
+
+DELETE FROM monitoring.nodes
+ WHERE id = '10000000-0000-0000-0000-000000000001';
+
+RESET ROLE;
+
+DO $node_delete_assertions$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM monitoring.nodes
+         WHERE id = '10000000-0000-0000-0000-000000000001'
+    ) OR EXISTS (
+        SELECT 1 FROM monitoring.node_metric_samples
+         WHERE node_id = '10000000-0000-0000-0000-000000000001'
+    ) OR EXISTS (
+        SELECT 1 FROM monitoring.filesystem_metric_samples
+         WHERE node_id = '10000000-0000-0000-0000-000000000001'
+    ) OR EXISTS (
+        SELECT 1 FROM monitoring.network_metric_samples
+         WHERE node_id = '10000000-0000-0000-0000-000000000001'
+    ) OR EXISTS (
+        SELECT 1 FROM monitoring.gpu_metric_samples
+         WHERE node_id = '10000000-0000-0000-0000-000000000001'
+    ) OR EXISTS (
+        SELECT 1 FROM monitoring.node_metric_hourly
+         WHERE node_id = '10000000-0000-0000-0000-000000000001'
+    ) OR EXISTS (
+        SELECT 1 FROM monitoring.filesystem_metric_hourly
+         WHERE node_id = '10000000-0000-0000-0000-000000000001'
+    ) OR EXISTS (
+        SELECT 1 FROM monitoring.network_metric_hourly
+         WHERE node_id = '10000000-0000-0000-0000-000000000001'
+    ) OR EXISTS (
+        SELECT 1 FROM monitoring.gpu_metric_hourly
+         WHERE node_id = '10000000-0000-0000-0000-000000000001'
+    ) THEN
+        RAISE EXCEPTION 'node deletion left related records behind';
+    END IF;
+END
+$node_delete_assertions$;
+
 ROLLBACK;

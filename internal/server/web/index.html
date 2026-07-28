@@ -156,6 +156,27 @@
       </div>
     </form>
   </dialog>
+  <dialog id="delete-node-dialog" class="preference-dialog" aria-labelledby="delete-node-title">
+    <div class="dialog-head">
+      <div>
+        <h2 id="delete-node-title">删除节点</h2>
+        <p id="delete-node-context"></p>
+      </div>
+      <button id="close-delete-node-dialog" class="icon-button" type="button" title="关闭" aria-label="关闭">×</button>
+    </div>
+    <form id="delete-node-form" class="preference-form">
+      <p class="delete-warning">节点凭据、硬件清单、历史指标和告警将被永久删除。</p>
+      <label class="field">
+        <span>Admin Token</span>
+        <input id="delete-node-admin-token" name="admin_token" type="password" required autocomplete="off" spellcheck="false">
+      </label>
+      <p id="delete-node-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="secondary-button" type="button" data-close-delete-node>取消</button>
+        <button id="confirm-delete-node" class="danger-button" type="submit">删除节点</button>
+      </div>
+    </form>
+  </dialog>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

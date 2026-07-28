@@ -34,6 +34,12 @@
   const tagAdminToken = document.getElementById("tag-admin-token");
   const tagError = document.getElementById("tag-error");
   const saveTags = document.getElementById("save-tags");
+  const deleteNodeDialog = document.getElementById("delete-node-dialog");
+  const deleteNodeForm = document.getElementById("delete-node-form");
+  const deleteNodeContext = document.getElementById("delete-node-context");
+  const deleteNodeAdminToken = document.getElementById("delete-node-admin-token");
+  const deleteNodeError = document.getElementById("delete-node-error");
+  const confirmDeleteNode = document.getElementById("confirm-delete-node");
   const ranges = ["1h", "6h", "24h", "7d", "30d", "90d"];
   const adminTokenStorageKey = "server-status.admin-token";
   const adminTokenLifetimeMs = 30 * 24 * 60 * 60 * 1000;
@@ -49,6 +55,7 @@
   let cachedAdminTokenExpiresAt = storedAdminToken.expiresAt;
   let pendingNetworkPreference = null;
   let pendingTagNodeID = null;
+  let pendingDeleteNodeID = null;
   let selectedOS = "";
   let selectedTag = "";
   let historyRequestSequence = 0;
@@ -391,9 +398,10 @@
       ? `<span>${escapeHTML(node.hostname)}</span>` : "";
     const lastReport = node.status === "pending" ? "等待首次上报" : `最近上报 ${formatTime(node.last_seen_at, true)}`;
     const rangeButtons = ranges.map((range) => `<button class="range-button ${range === selectedRange ? "active" : ""}" type="button" data-range="${range}">${range}</button>`).join("");
-    const agentActions = isWindowsNode(node)
-      ? '<div class="detail-actions"><button class="secondary-button" type="button" data-agent-upgrade>更新 Agent</button></div>'
+    const agentUpgradeAction = isWindowsNode(node)
+      ? '<button class="secondary-button" type="button" data-agent-upgrade>更新 Agent</button>'
       : "";
+    const agentActions = `<div class="detail-actions">${agentUpgradeAction}<button class="danger-button" type="button" data-delete-node>删除节点</button></div>`;
     app.innerHTML = `<div class="detail-head">
       <button class="back-button" type="button" title="返回节点列表" aria-label="返回节点列表">←</button>
       <div class="detail-title"><h1>${escapeHTML(displayName(node))}</h1><div class="detail-meta">
@@ -433,6 +441,7 @@
     app.querySelector("[data-edit-tags]").addEventListener("click", () => openTagDialog(node));
     const agentUpgradeButton = app.querySelector("[data-agent-upgrade]");
     if (agentUpgradeButton) agentUpgradeButton.addEventListener("click", () => openAgentUpdateDialog(node));
+    app.querySelector("[data-delete-node]").addEventListener("click", () => openDeleteNodeDialog(node));
     app.querySelectorAll("[data-range]").forEach((button) => button.addEventListener("click", () => changeRange(node.node_id, button.dataset.range)));
     app.querySelectorAll("[data-primary-interface-id]").forEach((button) => button.addEventListener("click", () => {
       selectPrimaryNetworkInterface(node.node_id, button.dataset.primaryInterfaceId, button.dataset.interfaceName, button);
@@ -895,6 +904,62 @@
     }
   }
 
+  function openDeleteNodeDialog(node) {
+    pendingDeleteNodeID = node.node_id;
+    const address = node.primary_ip || node.hostname;
+    deleteNodeContext.textContent = `${displayName(node)}${address ? ` · ${address}` : ""}`;
+    deleteNodeAdminToken.value = currentAdminToken();
+    deleteNodeError.hidden = true;
+    deleteNodeError.textContent = "";
+    deleteNodeDialog.showModal();
+    deleteNodeAdminToken.focus();
+  }
+
+  function closeDeleteNodeDialog() {
+    deleteNodeDialog.close();
+  }
+
+  async function deleteNode(nodeID, token) {
+    const response = await fetch(`/api/v1/admin/nodes/${encodeURIComponent(nodeID)}`, {
+      method: "DELETE",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`
+      }
+    });
+    if (!response.ok) {
+      let message = `删除失败 (${response.status})`;
+      try { message = (await response.json()).error || message; } catch (_) { /* response is not JSON */ }
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
+    }
+  }
+
+  async function submitDeleteNode(event) {
+    event.preventDefault();
+    if (!deleteNodeForm.reportValidity() || !pendingDeleteNodeID) return;
+    const token = deleteNodeAdminToken.value.trim();
+    deleteNodeError.hidden = true;
+    confirmDeleteNode.disabled = true;
+    confirmDeleteNode.textContent = "正在删除";
+    try {
+      await deleteNode(pendingDeleteNodeID, token);
+      rememberAdminToken(token);
+      closeDeleteNodeDialog();
+      currentDetail = null;
+      currentHistory = { points: [], gpus: [] };
+      location.hash = "";
+    } catch (error) {
+      if (error.status === 401) clearStoredAdminToken();
+      deleteNodeError.textContent = error.status === 401 ? "Admin Token 无效" : error.message;
+      deleteNodeError.hidden = false;
+    } finally {
+      confirmDeleteNode.disabled = false;
+      confirmDeleteNode.textContent = "删除节点";
+    }
+  }
+
   function renderError(error, withBack) {
     app.innerHTML = `<div class="error-state"><strong>数据读取失败</strong><span>${escapeHTML(error.message)}</span>${withBack ? '<button class="back-button" type="button" title="返回节点列表" aria-label="返回节点列表">←</button>' : ""}</div>`;
     const back = app.querySelector(".back-button");
@@ -1220,6 +1285,16 @@
     tagError.textContent = "";
   });
   tagForm.addEventListener("submit", submitTags);
+  document.getElementById("close-delete-node-dialog").addEventListener("click", closeDeleteNodeDialog);
+  deleteNodeDialog.querySelector("[data-close-delete-node]").addEventListener("click", closeDeleteNodeDialog);
+  deleteNodeDialog.addEventListener("close", () => {
+    pendingDeleteNodeID = null;
+    deleteNodeContext.textContent = "";
+    deleteNodeAdminToken.value = "";
+    deleteNodeError.hidden = true;
+    deleteNodeError.textContent = "";
+  });
+  deleteNodeForm.addEventListener("submit", submitDeleteNode);
   window.addEventListener("hashchange", route);
   window.addEventListener("resize", () => {
     if (!currentDetail) return;

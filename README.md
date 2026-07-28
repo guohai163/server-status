@@ -166,6 +166,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V009__hardware_health_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V010__sas_health_counters.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V011__raid_controller_status.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V012__alert_events.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V013__cascade_node_deletion.sql
 ```
 
 中央服务应使用继承 `server_status_writer` 的独立登录角色，不要使用 PostgreSQL 超级用户。
@@ -181,7 +182,7 @@ SERVER_STATUS_LISTEN_ADDR=:8080
 SERVER_STATUS_CENTRAL_IMAGE=ghcr.io/guohai163/server-status-central:0.8.0
 ```
 
-Admin Token 只用于节点注册、令牌轮换和管理员查询。
+Admin Token 只用于节点注册、令牌轮换、节点删除和管理员查询。
 
 ### 3. 一键部署中心
 
@@ -261,6 +262,7 @@ macOS 节点在“添加节点”中选择 `macOS 11 及以上`。生成的命�
 | `POST` | `/api/v1/admin/nodes` | Admin Token | 注册节点或轮换节点 Token |
 | `GET` | `/api/v1/admin/nodes` | Admin Token | 查询节点状态列表 |
 | `GET` | `/api/v1/admin/nodes/{node_id}` | Admin Token | 查询节点、文件系统和网卡详情 |
+| `DELETE` | `/api/v1/admin/nodes/{node_id}` | Admin Token | 永久删除节点及其凭据、清单、指标和告警 |
 | `PUT` | `/api/v1/admin/nodes/{node_id}/primary-network-interface` | Admin Token | 设置首页卡片 IP 使用的网络接口 |
 
 所有受保护接口使用：

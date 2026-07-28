@@ -28,6 +28,8 @@ type fakeStore struct {
 	homepageSummaryErr          error
 	nodes                       []store.NodeSummary
 	nodeDetails                 map[string]store.NodeDetail
+	deletedNodeID               string
+	deleteNodeErr               error
 	primaryNetworkNodeID        string
 	primaryNetworkInterfaceID   string
 	primaryNetworkPreferenceErr error
@@ -67,6 +69,10 @@ func (fake *fakeStore) GetNode(_ context.Context, nodeID string) (store.NodeDeta
 		return detail, nil
 	}
 	return store.NodeDetail{}, store.ErrNotFound
+}
+func (fake *fakeStore) DeleteNode(_ context.Context, nodeID string) error {
+	fake.deletedNodeID = nodeID
+	return fake.deleteNodeErr
 }
 func (fake *fakeStore) SetPrimaryNetworkInterface(_ context.Context, nodeID, interfaceID string) error {
 	fake.primaryNetworkNodeID = nodeID
@@ -316,6 +322,26 @@ func TestWebDashboardIsServed(t *testing.T) {
 	for _, fragment := range []string{`id="alerts-button"`, `href="/alerts"`, `target="_blank"`, `rel="noopener"`} {
 		if !bytes.Contains(response.Body.Bytes(), []byte(fragment)) {
 			t.Errorf("dashboard alert link does not contain %q", fragment)
+		}
+	}
+	for _, fragment := range []string{`id="delete-node-dialog"`, `id="delete-node-admin-token"`, `id="confirm-delete-node"`} {
+		if !bytes.Contains(response.Body.Bytes(), []byte(fragment)) {
+			t.Errorf("dashboard node deletion dialog does not contain %q", fragment)
+		}
+	}
+}
+
+func TestWebDashboardDeletesNodesThroughAdminAPI(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected dashboard script to return 200, got %d", response.Code)
+	}
+	for _, fragment := range []string{`data-delete-node`, `method: "DELETE"`, `Authorization: ` + "`Bearer ${token}`"} {
+		if !strings.Contains(response.Body.String(), fragment) {
+			t.Errorf("dashboard node deletion script does not contain %q", fragment)
 		}
 	}
 }
@@ -730,6 +756,60 @@ func TestSetPrimaryNetworkInterfaceRequiresAdminToken(t *testing.T) {
 	}
 	if database.primaryNetworkInterfaceID != "" {
 		t.Fatal("unauthorized preference change reached the store")
+	}
+}
+
+func TestDeleteNodeRequiresAdminToken(t *testing.T) {
+	api, database := testAPI()
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/nodes/10000000-0000-4000-8000-000000000001", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", response.Code, response.Body.String())
+	}
+	if database.deletedNodeID != "" {
+		t.Fatal("unauthorized deletion reached the store")
+	}
+}
+
+func TestDeleteNodeRemovesRequestedNode(t *testing.T) {
+	api, database := testAPI()
+	nodeID := "10000000-0000-4000-8000-000000000001"
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/nodes/"+nodeID, nil)
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", response.Code, response.Body.String())
+	}
+	if database.deletedNodeID != nodeID {
+		t.Fatalf("deleted node %q, want %q", database.deletedNodeID, nodeID)
+	}
+}
+
+func TestDeleteNodeReturnsNotFound(t *testing.T) {
+	api, database := testAPI()
+	database.deleteNodeErr = store.ErrNotFound
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/nodes/10000000-0000-4000-8000-000000000001", nil)
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestDeleteNodeRejectsInvalidNodeID(t *testing.T) {
+	api, database := testAPI()
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/nodes/not-a-uuid", nil)
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", response.Code, response.Body.String())
+	}
+	if database.deletedNodeID != "" {
+		t.Fatal("invalid node id reached the store")
 	}
 }
 
