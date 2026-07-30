@@ -30,14 +30,16 @@ func TestNormalizeNodeSummaryPreservesReportedAndDisabledStatus(t *testing.T) {
 }
 
 func TestDiskUsageQueriesExcludeReadOnlyFilesystems(t *testing.T) {
+	expectedPredicate := "NOT (filesystem.mount_options && ARRAY['ro', 'read-only']::text[])"
 	queries := map[string]string{
+		"alerts":  filesystemAlertInputsSQL,
 		"current": nodeSummarySQL,
 		"raw":     rawHistorySQL,
 		"hourly":  hourlyHistorySQL,
 	}
 	for name, query := range queries {
-		if !strings.Contains(query, "NOT ('ro' = ANY(filesystem.mount_options))") {
-			t.Errorf("%s disk usage query does not exclude read-only filesystems", name)
+		if !strings.Contains(query, expectedPredicate) {
+			t.Errorf("%s disk usage query does not exclude ro and read-only filesystems", name)
 		}
 	}
 	if !strings.Contains(nodeSummarySQL, "filesystem.removed_at IS NULL") {

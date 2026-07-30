@@ -322,6 +322,8 @@ const nodeListOrderSQL = `
 	          END NULLS LAST,
 	          status.hostname`
 
+const writableFilesystemPredicateSQL = `NOT (filesystem.mount_options && ARRAY['ro', 'read-only']::text[])`
+
 const nodeSummarySQL = `
 	SELECT
 		status.node_id::text,
@@ -405,7 +407,7 @@ const nodeSummarySQL = `
 		   AND filesystem.id = filesystem_metric.filesystem_id
 		 WHERE filesystem_metric.node_id = status.node_id
 		   AND filesystem.removed_at IS NULL
-		   AND NOT ('ro' = ANY(filesystem.mount_options))
+		   AND ` + writableFilesystemPredicateSQL + `
 	  ) filesystem_usage ON true
 	  LEFT JOIN LATERAL (
 		SELECT sum(rx_bits_per_second) / 8 AS rx_bytes_per_second,
@@ -960,7 +962,7 @@ const rawHistorySQL = `
 		   AND filesystem.id = filesystem_sample.filesystem_id
 		 WHERE filesystem_sample.node_id = $1::uuid
 		   AND filesystem_sample.bucket_at >= $2
-		   AND NOT ('ro' = ANY(filesystem.mount_options))
+		   AND ` + writableFilesystemPredicateSQL + `
 		 GROUP BY filesystem_sample.bucket_at
 	), network_by_bucket AS (
 		SELECT network_sample.bucket_at,
@@ -1010,7 +1012,7 @@ const hourlyHistorySQL = `
 		   AND filesystem.id = filesystem_sample.filesystem_id
 		 WHERE filesystem_sample.node_id = $1::uuid
 		   AND filesystem_sample.hour_at >= $2
-		   AND NOT ('ro' = ANY(filesystem.mount_options))
+		   AND ` + writableFilesystemPredicateSQL + `
 		 GROUP BY filesystem_sample.hour_at
 	), network_by_hour AS (
 		SELECT network_sample.hour_at,

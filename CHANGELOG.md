@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v0.20.1 - 2026-07-30
+
+### Fixed
+- Exclude filesystems reported as `ro` or `read-only` from capacity alerts, dashboard disk usage, and history so read-only runtime volumes do not trigger false critical alerts.
+
 ## v0.20.0 - 2026-07-28
 
 ### Added

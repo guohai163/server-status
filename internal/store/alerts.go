@@ -317,8 +317,7 @@ func collectAlertSignals(ctx context.Context, tx pgx.Tx, nodes map[string]alertN
 	return signals, nil
 }
 
-func collectFilesystemAlertSignals(ctx context.Context, tx pgx.Tx, nodes map[string]alertNodeState, openAlerts map[string]openAlert) ([]alertSignal, error) {
-	rows, err := tx.Query(ctx, `
+const filesystemAlertInputsSQL = `
 		SELECT metric.node_id::text, filesystem.id::text, filesystem.device_name,
 		       filesystem.mount_point, metric.bucket_at, metric.total_bytes,
 		       metric.available_bytes, metric.used_percent::double precision
@@ -326,8 +325,11 @@ func collectFilesystemAlertSignals(ctx context.Context, tx pgx.Tx, nodes map[str
 		  JOIN monitoring.filesystems filesystem
 		    ON filesystem.node_id = metric.node_id AND filesystem.id = metric.filesystem_id
 		 WHERE filesystem.removed_at IS NULL
-		   AND NOT ('ro' = ANY(filesystem.mount_options))
-	`)
+		   AND ` + writableFilesystemPredicateSQL + `
+`
+
+func collectFilesystemAlertSignals(ctx context.Context, tx pgx.Tx, nodes map[string]alertNodeState, openAlerts map[string]openAlert) ([]alertSignal, error) {
+	rows, err := tx.Query(ctx, filesystemAlertInputsSQL)
 	if err != nil {
 		return nil, fmt.Errorf("query filesystem alert inputs: %w", err)
 	}
