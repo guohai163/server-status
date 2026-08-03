@@ -543,12 +543,7 @@ func collectHWMONSensors(root string) []report.HardwareSensorMetric {
 			}
 		}
 	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].SensorType != result[j].SensorType {
-			return result[i].SensorType < result[j].SensorType
-		}
-		return result[i].Key < result[j].Key
-	})
+	sortHardwareSensors(result)
 	return result
 }
 

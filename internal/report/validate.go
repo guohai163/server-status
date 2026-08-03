@@ -362,7 +362,7 @@ func validTemperature(value float64) bool {
 	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= -273.15 && value <= 1000
 }
 
-// ValidHardwareSensorValue applies the report bounds for a scaled hwmon reading.
+// ValidHardwareSensorValue applies the report bounds for a normalized hardware-sensor reading.
 func ValidHardwareSensorValue(sensorType string, value float64) bool {
 	if math.IsNaN(value) || math.IsInf(value, 0) {
 		return false

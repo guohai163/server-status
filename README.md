@@ -39,7 +39,7 @@ macOS 11 及以上使用独立的零依赖 `zsh` Agent，通过系统自带命�
 ### Agent
 
 1. 启动后立即采集一次，以后保持约 60 秒的采集起点间隔。
-2. 从 `/proc`、`/sys` 和系统 API 读取 CPU、内存、块设备、文件系统、网卡与 hwmon 温度；实体机还从 hwmon 读取风扇转速、电压、电流和功率。发现 `smartctl` 时额外采集直连盘和 RAID 透传成员盘的 SMART 状态，发现 StorCLI/PERCCLI 时读取 RAID 拓扑和重建状态。
+2. 从 `/proc`、`/sys` 和系统 API 读取 CPU、内存、块设备、文件系统、网卡与 hwmon 温度；实体机优先从本地 IPMI 读取风扇转速、电压、电流和功率，并由 hwmon 补充 IPMI 缺失的类型。发现 `smartctl` 时额外采集直连盘和 RAID 透传成员盘的 SMART 状态，发现 StorCLI/PERCCLI 时读取 RAID 拓扑和重建状态。
 3. 对硬件清单排序并计算 SHA-256 指纹。
 4. 计算网卡和磁盘累计计数与上一次采集值的差值；计数器重置时本次增量记为 0。
 5. 使用节点专属 Bearer Token 将完整 JSON 快照发送到中心 `/api/v1/reports`。
@@ -208,7 +208,9 @@ curl http://127.0.0.1:8080/readyz
 
 目标节点不需要 Go、make、Python、Git 仓库或 SSH 服务，只需 Linux、`sudo`、`curl`、`crontab` 和 `sha256sum`。当前发布支持 `amd64/x86_64` 与 `arm64/aarch64`。
 
-温度以及实体机的风扇转速、电压、电流和功率从 Linux hwmon 读取，不增加依赖。传感器模块只在实体机详情展示；虚拟机不采集也不展示。SMART 与 RAID 控制器透传是可选增强能力，需要目标节点安装 smartmontools 7.0 及以上，并让 Agent 以 root 运行；缺少 `smartctl`、设备不支持 SMART 或控制器/驱动不支持透传时，其他指标仍会正常上报，详情页显示 SMART 未采集。Agent 使用 `smartctl --scan-open --json` 获取每块盘所需的设备类型，因此支持 smartmontools 能识别的 MegaRAID、AACRAID、Areca、3ware、HighPoint、CCISS 和 SSSRAID 透传路径，不需要在 Agent 配置中手工枚举槽位。smartmontools 7.2 及以上还会为 SAS 盘上报 grown defect、ECC 纠错和 non-medium 错误累计值；中心依据前后两份已接收快照计算后两项的增量，避免把多年累计值直接判为当前风险。
+温度从 Linux hwmon 读取。实体机的风扇转速、电压、电流和功率优先通过本地 `ipmitool -I open sensor list` 从 BMC/iDRAC 读取；IPMI 未提供的传感器类型继续从 hwmon 补充。传感器模块只在实体机详情展示，虚拟机不采集也不展示。Ubuntu/Debian 可执行 `sudo apt-get update && sudo apt-get install -y ipmitool`，RHEL/CentOS/Rocky/AlmaLinux 可执行 `sudo dnf install -y ipmitool` 或 `sudo yum install -y ipmitool`；安装后使用 `sudo ipmitool -I open sensor list` 验证本地 BMC 接口。缺少 `ipmitool`、`/dev/ipmi0` 或 IPMI 读取失败时，Agent 自动回退到 hwmon，不影响其他指标。
+
+SMART 与 RAID 控制器透传是可选增强能力，需要目标节点安装 smartmontools 7.0 及以上，并让 Agent 以 root 运行；缺少 `smartctl`、设备不支持 SMART 或控制器/驱动不支持透传时，其他指标仍会正常上报，详情页显示 SMART 未采集。Agent 使用 `smartctl --scan-open --json` 获取每块盘所需的设备类型，因此支持 smartmontools 能识别的 MegaRAID、AACRAID、Areca、3ware、HighPoint、CCISS 和 SSSRAID 透传路径，不需要在 Agent 配置中手工枚举槽位。smartmontools 7.2 及以上还会为 SAS 盘上报 grown defect、ECC 纠错和 non-medium 错误累计值；中心依据前后两份已接收快照计算后两项的增量，避免把多年累计值直接判为当前风险。
 
 Linux Agent 还会自动查找 `storcli64`、`storcli`、`perccli64` 或 `perccli`。发现工具后通过 JSON 输出采集控制器、磁盘组、虚拟盘和物理槽位状态；只有物理盘处于 `Rbld` 时才额外查询重建百分比。没有管理工具或命令执行失败时不会影响其他指标，详情页不显示 RAID 控制器区块。
 

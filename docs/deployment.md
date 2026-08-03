@@ -40,7 +40,26 @@ curl http://10.12.54.200:8080/readyz
 
 目标节点只需要 Linux、`sudo`、`curl`、`crontab` 与 `sha256sum`，不需要 Go、make、Python、仓库副本或 SSH 服务。当前列出的长期验证节点仍保留旧版用户目录部署，重新执行中心生成的新安装命令后才会迁移到 `/opt/server-agent`。
 
-Linux 温度通过 `/sys/class/hwmon` 采集；实体机还会从同一路径采集风扇转速、电压、电流和功率，虚拟机不采集也不展示这些通用传感器。SMART 是可选能力：安装 smartmontools 7.0 及以上后，root Agent 会通过 `smartctl --scan-open --json` 自动发现直连盘和受支持 RAID 控制器后的物理成员盘。缺少工具、SMART 不可用或控制器不支持透传不会使 Agent 上报失败。旧版用户目录 Agent 通常没有读取 SMART/RAID ioctl 的权限，应迁移为当前 root 安装方式后再启用。
+Linux 温度通过 `/sys/class/hwmon` 采集。实体机的风扇转速、电压、电流和功率优先通过本地 `ipmitool -I open sensor list` 从 BMC/iDRAC 采集；IPMI 未返回某种传感器时，Agent 再从 hwmon 补充该类型，虚拟机仍不采集或展示这些通用传感器。缺少 `ipmitool`、本地 IPMI 设备或读取权限不会使上报失败。
+
+安装并验证 IPMI 工具：
+
+```bash
+# Ubuntu / Debian
+sudo apt-get update
+sudo apt-get install -y ipmitool
+
+# RHEL / CentOS / Rocky Linux / AlmaLinux（按系统选择 dnf 或 yum）
+sudo dnf install -y ipmitool
+sudo yum install -y ipmitool
+
+# 本地 BMC 接口应返回传感器列表
+sudo modprobe ipmi_si
+sudo modprobe ipmi_devintf
+sudo ipmitool -I open sensor list
+```
+
+SMART 是可选能力：安装 smartmontools 7.0 及以上后，root Agent 会通过 `smartctl --scan-open --json` 自动发现直连盘和受支持 RAID 控制器后的物理成员盘。缺少工具、SMART 不可用或控制器不支持透传不会使 Agent 上报失败。旧版用户目录 Agent 通常没有读取 SMART/RAID ioctl 的权限，应迁移为当前 root 安装方式后再启用。
 
 RAID 控制器拓扑也是可选能力。Linux Agent 会自动发现 PATH 中的 `storcli64`、`storcli`、`perccli64` 或 `perccli`，并兼容 `/usr/local/bin/storcli64`、`/opt/MegaRAID/storcli/storcli64` 和 `/opt/MegaRAID/perccli/perccli64`。工具可用时详情页显示控制器、虚拟盘、物理盘接口与状态；处于重建状态的盘还显示百分比和控制器返回的预计剩余时间。
 

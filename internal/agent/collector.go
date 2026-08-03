@@ -108,7 +108,7 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 	temperatures := collectHWMONTemperatures("/sys/class/hwmon")
 	hardwareSensors := []report.HardwareSensorMetric(nil)
 	if machineType == "physical" {
-		hardwareSensors = collectHWMONSensors("/sys/class/hwmon")
+		hardwareSensors = collectPhysicalHardwareSensors(ctx, "/sys/class/hwmon")
 	}
 	for _, metric := range gpuMetrics {
 		if metric.TemperatureCelsius == nil {

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v0.22.0 - 2026-08-03
+
+### Added
+- Prefer local IPMI fan, voltage, current, and power readings on physical Linux nodes, with per-type fallback to hwmon when IPMI is unavailable.
+
 ## v0.21.0 - 2026-08-03
 
 ### Added
