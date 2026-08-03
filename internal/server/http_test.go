@@ -678,6 +678,25 @@ func TestWebUIShowsRAIDControllerTopologyAndRebuildProgress(t *testing.T) {
 	}
 }
 
+func TestWebUIShowsHardwareSensorsOnlyForPhysicalNodes(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /assets/app.js returned %d", response.Code)
+	}
+	script := response.Body.String()
+	for _, fragment := range []string{
+		`isPhysicalNode(node) ? hardwareSensorSection(detail.hardware_sensors) : ""`,
+		"风扇转速", "电压", "电流", "功率", "item.alarm", "item.fault",
+	} {
+		if !strings.Contains(script, fragment) {
+			t.Errorf("hardware sensor UI does not contain %q", fragment)
+		}
+	}
+}
+
 func TestHistoryRangeValidation(t *testing.T) {
 	api, _ := testAPI()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes/10000000-0000-4000-8000-000000000001/history?range=forever", nil)

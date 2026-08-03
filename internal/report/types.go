@@ -125,6 +125,7 @@ type Metrics struct {
 	Network         []NetworkMetrics       `json:"network"`
 	GPUs            []GPUMetrics           `json:"gpus,omitempty"`
 	Temperatures    []TemperatureMetrics   `json:"temperatures,omitempty"`
+	HardwareSensors []HardwareSensorMetric `json:"hardware_sensors,omitempty"`
 	StorageHealth   []StorageHealth        `json:"storage_health,omitempty"`
 	RAIDControllers []RAIDControllerStatus `json:"raid_controllers,omitempty"`
 }
@@ -177,6 +178,18 @@ type TemperatureMetrics struct {
 	TemperatureCelsius float64  `json:"temperature_celsius"`
 	HighCelsius        *float64 `json:"high_celsius,omitempty"`
 	CriticalCelsius    *float64 `json:"critical_celsius,omitempty"`
+}
+
+type HardwareSensorMetric struct {
+	Key           string   `json:"key"`
+	SensorType    string   `json:"sensor_type"`
+	Label         string   `json:"label"`
+	Value         float64  `json:"value"`
+	MinValue      *float64 `json:"min_value,omitempty"`
+	MaxValue      *float64 `json:"max_value,omitempty"`
+	CriticalValue *float64 `json:"critical_value,omitempty"`
+	Alarm         bool     `json:"alarm"`
+	Fault         bool     `json:"fault"`
 }
 
 type StorageHealth struct {

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/guohai/server-status/internal/report"
 )
 
 func TestParseSMARTScanIncludesRAIDPassthroughDevices(t *testing.T) {
@@ -191,5 +193,49 @@ func TestCollectHWMONTemperatures(t *testing.T) {
 	}
 	if metrics[0].HighCelsius == nil || *metrics[0].HighCelsius != 90 || metrics[0].CriticalCelsius == nil || *metrics[0].CriticalCelsius != 105 {
 		t.Fatalf("unexpected hwmon thresholds: %+v", metrics[0])
+	}
+}
+
+func TestCollectHWMONSensorsScalesValuesAndReadsStatus(t *testing.T) {
+	root := t.TempDir()
+	chip := filepath.Join(root, "hwmon0")
+	if err := os.Mkdir(chip, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"name":         "nct6775\n",
+		"fan1_label":   "System Fan\n",
+		"fan1_input":   "4200\n",
+		"fan1_min":     "1200\n",
+		"fan1_alarm":   "1\n",
+		"fan2_input":   "-1\n",
+		"in0_input":    "12100\n",
+		"curr1_input":  "2500\n",
+		"power1_input": "85000000\n",
+		"power1_crit":  "120000000\n",
+	}
+	for name, value := range files {
+		if err := os.WriteFile(filepath.Join(chip, name), []byte(value), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	metrics := collectHWMONSensors(root)
+	if len(metrics) != 4 {
+		t.Fatalf("expected four valid hwmon sensors, got %+v", metrics)
+	}
+	byType := make(map[string]report.HardwareSensorMetric, len(metrics))
+	for _, metric := range metrics {
+		byType[metric.SensorType] = metric
+	}
+	fan := byType["fan"]
+	if fan.Label != "System Fan" || fan.Value != 4200 || fan.MinValue == nil || *fan.MinValue != 1200 || !fan.Alarm || fan.Fault {
+		t.Fatalf("unexpected fan metric: %+v", fan)
+	}
+	if byType["voltage"].Value != 12.1 || byType["current"].Value != 2.5 {
+		t.Fatalf("unexpected electrical sensor scaling: %+v", byType)
+	}
+	power := byType["power"]
+	if power.Value != 85 || power.CriticalValue == nil || *power.CriticalValue != 120 {
+		t.Fatalf("unexpected power metric: %+v", power)
 	}
 }

@@ -34,9 +34,10 @@ func TestPostgresMACAddressAcceptsOnlySixByteAddresses(t *testing.T) {
 
 func TestHardwareHealthFreshnessQueriesRejectOlderSnapshots(t *testing.T) {
 	for name, query := range map[string]string{
-		"temperature": temperatureSnapshotFreshnessSQL,
-		"storage":     storageHealthSnapshotFreshnessSQL,
-		"RAID":        raidStatusSnapshotFreshnessSQL,
+		"temperature":     temperatureSnapshotFreshnessSQL,
+		"hardware sensor": hardwareSensorSnapshotFreshnessSQL,
+		"storage":         storageHealthSnapshotFreshnessSQL,
+		"RAID":            raidStatusSnapshotFreshnessSQL,
 	} {
 		if !strings.Contains(query, "bucket_at > $2") || !strings.Contains(query, "NOT EXISTS") {
 			t.Errorf("%s freshness query does not protect newer snapshots", name)

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v0.21.0 - 2026-08-03
+
+### Added
+- Collect Linux hwmon fan speed, voltage, current, and power readings for physical nodes, persist current sensor snapshots, and show them only on physical-node details.
+
 ## v0.20.1 - 2026-07-30
 
 ### Fixed

@@ -487,6 +487,85 @@ func collectHWMONTemperatures(root string) []report.TemperatureMetrics {
 	return result
 }
 
+type hwmonSensorSpec struct {
+	prefix     string
+	sensorType string
+	divisor    float64
+}
+
+var hwmonSensorSpecs = []hwmonSensorSpec{
+	{prefix: "fan", sensorType: "fan", divisor: 1},
+	{prefix: "in", sensorType: "voltage", divisor: 1000},
+	{prefix: "curr", sensorType: "current", divisor: 1000},
+	{prefix: "power", sensorType: "power", divisor: 1_000_000},
+}
+
+func collectHWMONSensors(root string) []report.HardwareSensorMetric {
+	chips, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	result := make([]report.HardwareSensorMetric, 0)
+	for _, chip := range chips {
+		base := filepath.Join(root, chip.Name())
+		chipName := readTrimmed(filepath.Join(base, "name"))
+		for _, spec := range hwmonSensorSpecs {
+			inputs, _ := filepath.Glob(filepath.Join(base, spec.prefix+"*_input"))
+			sort.Strings(inputs)
+			for _, input := range inputs {
+				value, ok := readScaledHWMONValue(input, spec.divisor)
+				if !ok || !report.ValidHardwareSensorValue(spec.sensorType, value) {
+					continue
+				}
+				stem := strings.TrimSuffix(filepath.Base(input), "_input")
+				label := readTrimmed(filepath.Join(base, stem+"_label"))
+				if label == "" {
+					label = strings.TrimSpace(chipName + " " + stem)
+				}
+				metric := report.HardwareSensorMetric{
+					Key: chip.Name() + ":" + stem, SensorType: spec.sensorType, Label: label, Value: value,
+					Alarm: readHWMONFlag(filepath.Join(base, stem+"_alarm")),
+					Fault: readHWMONFlag(filepath.Join(base, stem+"_fault")),
+				}
+				if threshold, valid := readScaledHWMONValue(filepath.Join(base, stem+"_min"), spec.divisor); valid && report.ValidHardwareSensorValue(spec.sensorType, threshold) {
+					metric.MinValue = &threshold
+				}
+				if threshold, valid := readScaledHWMONValue(filepath.Join(base, stem+"_max"), spec.divisor); valid && report.ValidHardwareSensorValue(spec.sensorType, threshold) {
+					metric.MaxValue = &threshold
+				}
+				if threshold, valid := readScaledHWMONValue(filepath.Join(base, stem+"_crit"), spec.divisor); valid && report.ValidHardwareSensorValue(spec.sensorType, threshold) {
+					metric.CriticalValue = &threshold
+				}
+				result = append(result, metric)
+				if len(result) >= 4096 {
+					return result
+				}
+			}
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].SensorType != result[j].SensorType {
+			return result[i].SensorType < result[j].SensorType
+		}
+		return result[i].Key < result[j].Key
+	})
+	return result
+}
+
+func readScaledHWMONValue(path string, divisor float64) (float64, bool) {
+	value, err := strconv.ParseFloat(readTrimmed(path), 64)
+	if err != nil || divisor <= 0 {
+		return 0, false
+	}
+	value /= divisor
+	return value, !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func readHWMONFlag(path string) bool {
+	value, err := strconv.ParseInt(readTrimmed(path), 10, 64)
+	return err == nil && value != 0
+}
+
 func readMillidegrees(path string) (float64, bool) {
 	value, err := strconv.ParseFloat(readTrimmed(path), 64)
 	if err != nil {

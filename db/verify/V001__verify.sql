@@ -155,6 +155,22 @@ INSERT INTO monitoring.temperature_current_metrics (
     52.5, 90, 105
 );
 
+INSERT INTO monitoring.hardware_sensor_current_snapshots (
+    node_id, bucket_at, collected_at, received_at
+) VALUES (
+    '10000000-0000-0000-0000-000000000001', date_trunc('minute', CURRENT_TIMESTAMP),
+    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+);
+
+INSERT INTO monitoring.hardware_sensor_current_metrics (
+    node_id, sensor_key, sensor_type, label, value,
+    min_value, max_value, critical_value, alarm, fault
+) VALUES
+    ('10000000-0000-0000-0000-000000000001', 'nct6775:fan1', 'fan', 'System Fan',
+     4200, 1200, 6000, NULL, false, false),
+    ('10000000-0000-0000-0000-000000000001', 'power-meter:power1', 'power', 'System Power',
+     85, NULL, NULL, 120, false, false);
+
 INSERT INTO monitoring.storage_health_current_metrics (
     node_id, block_device_id, bucket_at, collected_at, received_at,
     smart_available, smart_enabled, smart_status, risk_level, risk_reasons,
@@ -422,6 +438,17 @@ BEGIN
         RAISE EXCEPTION 'temperature current metric was not persisted';
     END IF;
 
+    SELECT count(*) INTO v_count
+      FROM monitoring.hardware_sensor_current_metrics metric
+      JOIN monitoring.hardware_sensor_current_snapshots snapshot USING (node_id)
+     WHERE metric.node_id = '10000000-0000-0000-0000-000000000001'
+       AND snapshot.bucket_at = date_trunc('minute', CURRENT_TIMESTAMP)
+       AND ((metric.sensor_type = 'fan' AND metric.value = 4200 AND metric.min_value = 1200)
+         OR (metric.sensor_type = 'power' AND metric.value = 85 AND metric.critical_value = 120));
+    IF v_count <> 2 THEN
+        RAISE EXCEPTION 'hardware sensor current metrics were not persisted';
+    END IF;
+
     IF NOT EXISTS (
         SELECT 1
           FROM monitoring.block_devices device
@@ -644,8 +671,8 @@ DECLARE
     v_count integer;
     v_severity text;
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM monitoring.schema_migrations WHERE version = 'V012') THEN
-        RAISE EXCEPTION 'V012 migration history entry is missing';
+    IF NOT EXISTS (SELECT 1 FROM monitoring.schema_migrations WHERE version = 'V014') THEN
+        RAISE EXCEPTION 'V014 migration history entry is missing';
     END IF;
     IF NOT EXISTS (
         SELECT 1
@@ -824,7 +851,9 @@ BEGIN
         RAISE EXCEPTION 'writer role lacks INSERT on GPU raw metrics';
     END IF;
     IF NOT has_table_privilege('server_status_writer', 'monitoring.temperature_current_metrics', 'INSERT') OR
-       NOT has_table_privilege('server_status_writer', 'monitoring.storage_health_current_metrics', 'INSERT') THEN
+       NOT has_table_privilege('server_status_writer', 'monitoring.storage_health_current_metrics', 'INSERT') OR
+       NOT has_table_privilege('server_status_writer', 'monitoring.hardware_sensor_current_snapshots', 'INSERT') OR
+       NOT has_table_privilege('server_status_writer', 'monitoring.hardware_sensor_current_metrics', 'INSERT') THEN
         RAISE EXCEPTION 'writer role lacks INSERT on hardware health metrics';
     END IF;
     IF NOT has_table_privilege('server_status_writer', 'monitoring.raid_status_current_snapshots', 'INSERT') OR
@@ -842,7 +871,9 @@ BEGIN
         RAISE EXCEPTION 'reader role can modify GPU raw metrics';
     END IF;
     IF has_table_privilege('server_status_reader', 'monitoring.temperature_current_metrics', 'INSERT') OR
-       has_table_privilege('server_status_reader', 'monitoring.storage_health_current_metrics', 'INSERT') THEN
+       has_table_privilege('server_status_reader', 'monitoring.storage_health_current_metrics', 'INSERT') OR
+       has_table_privilege('server_status_reader', 'monitoring.hardware_sensor_current_snapshots', 'INSERT') OR
+       has_table_privilege('server_status_reader', 'monitoring.hardware_sensor_current_metrics', 'INSERT') THEN
         RAISE EXCEPTION 'reader role can modify hardware health metrics';
     END IF;
     IF has_table_privilege('server_status_reader', 'monitoring.raid_status_current_snapshots', 'INSERT') OR
@@ -1017,6 +1048,12 @@ BEGIN
          WHERE node_id = '10000000-0000-0000-0000-000000000001'
     ) OR EXISTS (
         SELECT 1 FROM monitoring.gpu_metric_samples
+         WHERE node_id = '10000000-0000-0000-0000-000000000001'
+    ) OR EXISTS (
+        SELECT 1 FROM monitoring.hardware_sensor_current_snapshots
+         WHERE node_id = '10000000-0000-0000-0000-000000000001'
+    ) OR EXISTS (
+        SELECT 1 FROM monitoring.hardware_sensor_current_metrics
          WHERE node_id = '10000000-0000-0000-0000-000000000001'
     ) OR EXISTS (
         SELECT 1 FROM monitoring.node_metric_hourly

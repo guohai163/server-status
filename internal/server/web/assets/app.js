@@ -419,6 +419,7 @@
     </div>
     ${gpuSection(detail.gpus)}
     ${temperatureSection(detail.temperatures)}
+    ${isPhysicalNode(node) ? hardwareSensorSection(detail.hardware_sensors) : ""}
     ${raidSection(detail.raid_controllers)}
     ${storageHealthSection(detail.block_devices)}
     <section class="section"><div class="section-head"><div><h2>历史数据</h2><p data-history-subtitle>${historyResolutionLabel(history.resolution)}</p></div><div class="segmented" aria-label="历史时间范围">${rangeButtons}</div></div>
@@ -658,6 +659,37 @@
       return `<tr><td>${escapeHTML(componentLabels[item.component] || componentLabels.other)}</td><td>${escapeHTML(item.label)}</td><td><strong class="temperature-value ${state}">${formatTemperature(item.temperature_celsius)}</strong></td><td>${threshold}</td></tr>`;
     });
     return `<section class="section temperature-section"><div class="section-head"><div><h2>温度</h2><p>当前硬件传感器读数</p></div></div>${table(["组件", "传感器", "当前温度", "阈值"], rows)}</section>`;
+  }
+  function hardwareSensorMeta(sensorType) {
+    return ({
+      fan: { label: "风扇转速", unit: "RPM", digits: 0 },
+      voltage: { label: "电压", unit: "V", digits: 2 },
+      current: { label: "电流", unit: "A", digits: 2 },
+      power: { label: "功率", unit: "W", digits: 1 }
+    })[sensorType] || { label: "其他", unit: "", digits: 2 };
+  }
+  function formatHardwareSensorValue(item, value) {
+    if (!hasValue(value)) return "--";
+    const meta = hardwareSensorMeta(item.sensor_type);
+    return `${Number(value).toFixed(meta.digits)}${meta.unit ? ` ${meta.unit}` : ""}`;
+  }
+  function hardwareSensorState(item) {
+    if (item.fault || hasValue(item.critical_value) && item.value >= item.critical_value) return "critical";
+    if (item.alarm || hasValue(item.min_value) && item.value < item.min_value || hasValue(item.max_value) && item.value > item.max_value) return "warning";
+    return "healthy";
+  }
+  function hardwareSensorSection(items) {
+    const rows = (items || []).map((item) => {
+      const state = hardwareSensorState(item);
+      const threshold = [
+        hasValue(item.min_value) ? `下限 ${formatHardwareSensorValue(item, item.min_value)}` : "",
+        hasValue(item.max_value) ? `上限 ${formatHardwareSensorValue(item, item.max_value)}` : "",
+        hasValue(item.critical_value) ? `临界 ${formatHardwareSensorValue(item, item.critical_value)}` : ""
+      ].filter(Boolean).join(" / ") || "--";
+      const status = item.fault ? "故障" : item.alarm ? "告警" : state === "critical" ? "临界" : state === "warning" ? "超限" : "正常";
+      return `<tr><td>${escapeHTML(hardwareSensorMeta(item.sensor_type).label)}</td><td>${escapeHTML(item.label)}</td><td><strong class="sensor-value ${state}">${formatHardwareSensorValue(item, item.value)}</strong></td><td>${threshold}</td><td><span class="health-badge ${state}">${status}</span></td></tr>`;
+    });
+    return `<section class="section hardware-sensor-section"><div class="section-head"><div><h2>传感器</h2><p>实体机风扇、电气与功率读数</p></div></div>${table(["类型", "传感器", "当前值", "阈值", "状态"], rows)}</section>`;
   }
   function healthBadge(level) {
     const labels = { healthy: "正常", warning: "注意", critical: "高风险", unknown: "未知" };

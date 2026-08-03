@@ -273,6 +273,10 @@ button { color: inherit; }
 .temperature-value.healthy { color: var(--green); }
 .temperature-value.warning { color: var(--amber); }
 .temperature-value.critical { color: var(--red); }
+.sensor-value { color: var(--ink); }
+.sensor-value.healthy { color: var(--green); }
+.sensor-value.warning { color: var(--amber); }
+.sensor-value.critical { color: var(--red); }
 .health-badge, .access-badge { display: inline-flex; align-items: center; min-height: 20px; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 650; }
 .health-badge.healthy { background: var(--green-soft); color: var(--green); }
 .health-badge.warning { background: color-mix(in srgb, var(--amber) 14%, transparent); color: var(--amber); }

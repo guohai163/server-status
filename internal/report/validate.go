@@ -224,7 +224,7 @@ func validateMetrics(inventory Inventory, metrics Metrics) error {
 			return fmt.Errorf("GPU metric %q memory usage exceeds its total", item.GPUKey)
 		}
 	}
-	if len(metrics.Temperatures) > 4096 || len(metrics.StorageHealth) > 4096 || len(metrics.RAIDControllers) > 64 {
+	if len(metrics.Temperatures) > 4096 || len(metrics.HardwareSensors) > 4096 || len(metrics.StorageHealth) > 4096 || len(metrics.RAIDControllers) > 64 {
 		return errors.New("metrics contain too many hardware health resources")
 	}
 	if err := uniqueKeys("temperature metric", len(metrics.Temperatures), func(i int) string { return metrics.Temperatures[i].Key }); err != nil {
@@ -240,6 +240,22 @@ func validateMetrics(inventory Inventory, metrics Metrics) error {
 			item.HighCelsius != nil && !validTemperature(*item.HighCelsius) ||
 			item.CriticalCelsius != nil && !validTemperature(*item.CriticalCelsius) {
 			return fmt.Errorf("invalid temperature metric %q", item.Key)
+		}
+	}
+	if err := uniqueKeys("hardware sensor metric", len(metrics.HardwareSensors), func(i int) string { return metrics.HardwareSensors[i].Key }); err != nil {
+		return err
+	}
+	for _, item := range metrics.HardwareSensors {
+		switch item.SensorType {
+		case "fan", "voltage", "current", "power":
+		default:
+			return fmt.Errorf("hardware sensor metric %q has invalid type %q", item.Key, item.SensorType)
+		}
+		if strings.TrimSpace(item.Label) == "" || !ValidHardwareSensorValue(item.SensorType, item.Value) ||
+			item.MinValue != nil && !ValidHardwareSensorValue(item.SensorType, *item.MinValue) ||
+			item.MaxValue != nil && !ValidHardwareSensorValue(item.SensorType, *item.MaxValue) ||
+			item.CriticalValue != nil && !ValidHardwareSensorValue(item.SensorType, *item.CriticalValue) {
+			return fmt.Errorf("invalid hardware sensor metric %q", item.Key)
 		}
 	}
 	blockDeviceKeys := make(map[string]struct{}, len(inventory.BlockDevices))
@@ -344,6 +360,25 @@ func validateMetrics(inventory Inventory, metrics Metrics) error {
 
 func validTemperature(value float64) bool {
 	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= -273.15 && value <= 1000
+}
+
+// ValidHardwareSensorValue applies the report bounds for a scaled hwmon reading.
+func ValidHardwareSensorValue(sensorType string, value float64) bool {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return false
+	}
+	switch sensorType {
+	case "fan":
+		return value >= 0 && value <= 10_000_000
+	case "voltage":
+		return value >= -10_000 && value <= 10_000
+	case "current":
+		return value >= -1_000_000 && value <= 1_000_000
+	case "power":
+		return value >= -1_000_000_000_000 && value <= 1_000_000_000_000
+	default:
+		return false
+	}
 }
 
 func validateOptionalUnsignedBigints(values ...*uint64) error {

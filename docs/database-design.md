@@ -67,6 +67,8 @@ erDiagram
 | `node_network_preferences` | 首页卡片 IP 来源网卡；每个节点最多选择一个 |
 | `gpu_devices` | NVIDIA GPU UUID、设备索引、型号和显存容量 |
 | `temperature_current_metrics` | CPU、主板、GPU、存储及其他 hwmon 传感器的最新温度和阈值 |
+| `hardware_sensor_current_snapshots` | 实体机最新通用传感器快照的采集时间和乱序保护边界，包括空快照 |
+| `hardware_sensor_current_metrics` | 实体机最新风扇转速、电压、电流、功率、阈值与告警/故障状态 |
 | `storage_health_current_metrics` | 直连盘或 RAID 成员盘的最新 SMART 状态、通电时长、错误计数、磨损与风险 |
 | `raid_status_current_snapshots` | 每个节点最新 RAID 状态快照的采集时间和乱序保护边界 |
 | `raid_controller_current_metrics` | RAID 控制器型号、状态以及磁盘组、虚拟盘和物理盘数量 |
@@ -92,7 +94,7 @@ NVIDIA GPU 由 Agent 调用 `nvidia-smi` 识别，以 GPU UUID 作为稳定清�
 
 历史 API 对 `1h`、`6h` 保留分钟点，`24h` 在数据库端按 5 分钟聚合，`7d`、`30d`、`90d` 使用小时汇总。节点、文件系统和网络历史先在限定节点与时间范围内分别聚合，再按时间桶关联，避免对每个节点时间点重复执行资源子查询。成功响应在中央服务内缓存 30 秒，相同节点与范围的并发请求会合并为一次数据库查询。
 
-硬件温度、SMART 和 RAID 控制器状态只保存最新快照，不进入分钟分区或小时汇总。SMART 错误数据区分 ATA `Raw_Read_Error_Rate` 的厂商标准化值/原始值，以及 ATA 错误日志、SAS 不可校正错误或 NVMe 介质错误形成的错误计数，避免把不同厂商的原始属性直接当作可比较百分比。SAS 还保存 grown defect、ECC 纠错和 non-medium 错误累计值；中心在替换 current 快照前与上一份已接收值比较，保存 ECC/non-medium 增量。首次出现或计数器回退只建立新基线，同一分钟重试保留此前已算出的增量。风险等级由 SMART 总体结果、smartctl 状态位、待映射/不可校正/重映射扇区、SAS grown defect、SAS ECC/non-medium 增量、NVMe 严重警告和寿命使用量确定。RAID 快照使用独立的节点级时间标记，即使最新快照为空，也不会被乱序旧上报重新填充。
+硬件温度、通用传感器、SMART 和 RAID 控制器状态只保存最新快照，不进入分钟分区或小时汇总。通用传感器只接受实体机数据，并使用独立的节点级快照边界保护空快照和乱序上报。SMART 错误数据区分 ATA `Raw_Read_Error_Rate` 的厂商标准化值/原始值，以及 ATA 错误日志、SAS 不可校正错误或 NVMe 介质错误形成的错误计数，避免把不同厂商的原始属性直接当作可比较百分比。SAS 还保存 grown defect、ECC 纠错和 non-medium 错误累计值；中心在替换 current 快照前与上一份已接收值比较，保存 ECC/non-medium 增量。首次出现或计数器回退只建立新基线，同一分钟重试保留此前已算出的增量。风险等级由 SMART 总体结果、smartctl 状态位、待映射/不可校正/重映射扇区、SAS grown defect、SAS ECC/non-medium 增量、NVMe 严重警告和寿命使用量确定。RAID 快照使用独立的节点级时间标记，即使最新快照为空，也不会被乱序旧上报重新填充。
 
 `alert_events` 使用 `(node_id, category, resource_key) WHERE resolved_at IS NULL` 部分唯一索引保证同一异常只有一个当前事件。严重度在事件持续期间只能从 `warning` 升至 `critical`；恢复后写入 `resolved_at`，同一资源再次异常会创建新事件。离线期间只评估离线告警，已有资源告警保持未恢复；节点恢复上报后再依据最新快照判断。禁用和待安装节点不会产生告警，并关闭已有告警。
 
@@ -105,7 +107,7 @@ NVIDIA GPU 由 Agent 调用 `nvidia-smi` 识别，以 GPU UUID 作为稳定清�
 3. 更新 `nodes.last_seen_at`、Agent/系统版本；只有 `inventory_fingerprint` 变化时才处理清单。
 4. 对当前清单项更新 `last_seen_at`；缺失项设置 `removed_at`；新项创建新的观察周期。
 5. 使用 `INSERT ... ON CONFLICT (bucket_at, node_id) DO UPDATE` 写主快照。重试时先删除该节点、该分钟原有的文件系统、网卡和 GPU 明细，再插入完整明细。
-6. 温度、SMART 与 RAID 状态以整批 current 快照替换；只有同一分钟重试或更晚报告可以替换，乱序旧报告会被忽略。
+6. 温度、实体机传感器、SMART 与 RAID 状态以整批 current 快照替换；只有同一分钟重试或更晚报告可以替换，乱序旧报告会被忽略。
 7. 在一个数据库事务中提交。四个同步触发器只在新时间不早于 current 表时间时更新最新状态，因此乱序数据不会覆盖较新的状态。
 
 任一步失败都应回滚整个上报事务。应用应把数据库会话时区固定为 UTC，并使用参数化 SQL。
@@ -152,7 +154,7 @@ SELECT monitoring.rollup_hour($1::timestamptz);
 
 ## 部署与验证
 
-迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好，`V005` 增加 NVIDIA GPU 清单和当前指标，`V006` 增加每节点最多 5 个管理员 Tag，`V007` 增加逐 GPU 分钟历史、小时汇总与 current 同步触发器，`V008` 增加 ARM 性能核与能效核拓扑，`V009` 增加温度与 SMART 当前快照，`V010` 增加 SAS 缺陷、ECC 与 non-medium 计数及增量，`V011` 增加 RAID 控制器、虚拟盘、物理盘和重建状态，`V012` 增加持久化告警事件与清理函数，`V013` 修正资源历史外键，使节点及其全部关联记录可完整级联删除。在连接信息由环境或 `.pgpass` 提供的前提下执行：
+迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好，`V005` 增加 NVIDIA GPU 清单和当前指标，`V006` 增加每节点最多 5 个管理员 Tag，`V007` 增加逐 GPU 分钟历史、小时汇总与 current 同步触发器，`V008` 增加 ARM 性能核与能效核拓扑，`V009` 增加温度与 SMART 当前快照，`V010` 增加 SAS 缺陷、ECC 与 non-medium 计数及增量，`V011` 增加 RAID 控制器、虚拟盘、物理盘和重建状态，`V012` 增加持久化告警事件与清理函数，`V013` 修正资源历史外键，使节点及其全部关联记录可完整级联删除，`V014` 增加实体机 hwmon 通用传感器当前快照。在连接信息由环境或 `.pgpass` 提供的前提下执行：
 
 ```bash
 psql -v ON_ERROR_STOP=1 -f db/migrations/V001__monitoring_schema.sql
@@ -168,7 +170,8 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V010__sas_health_counters.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V011__raid_controller_status.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V012__alert_events.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V013__cascade_node_deletion.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V014__hardware_sensor_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/verify/V001__verify.sql
 ```
 
-验收脚本会覆盖节点、令牌、Tag 数量约束、硬件历史、温度/SMART 当前快照、RAID 透传与控制器拓扑、告警去重/升级/恢复/复发/保留期、多 GPU 当前/分钟/小时指标、IPv4/IPv6、首页网卡偏好、current 触发器、幂等更新、跨节点约束、小时汇总、角色权限和查询计划，最后执行 `ROLLBACK`，不会保留验证数据。
+验收脚本会覆盖节点、令牌、Tag 数量约束、硬件历史、温度/通用传感器/SMART 当前快照、RAID 透传与控制器拓扑、告警去重/升级/恢复/复发/保留期、多 GPU 当前/分钟/小时指标、IPv4/IPv6、首页网卡偏好、current 触发器、幂等更新、跨节点约束、小时汇总、角色权限和查询计划，最后执行 `ROLLBACK`，不会保留验证数据。

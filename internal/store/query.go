@@ -191,6 +191,19 @@ type TemperatureStatus struct {
 	CriticalCelsius    *float64  `json:"critical_celsius,omitempty"`
 }
 
+type HardwareSensorStatus struct {
+	Key           string    `json:"key"`
+	SensorType    string    `json:"sensor_type"`
+	Label         string    `json:"label"`
+	BucketAt      time.Time `json:"bucket_at"`
+	Value         float64   `json:"value"`
+	MinValue      *float64  `json:"min_value,omitempty"`
+	MaxValue      *float64  `json:"max_value,omitempty"`
+	CriticalValue *float64  `json:"critical_value,omitempty"`
+	Alarm         bool      `json:"alarm"`
+	Fault         bool      `json:"fault"`
+}
+
 type GPUStatus struct {
 	GPUDeviceID        string     `json:"gpu_device_id"`
 	Index              int        `json:"index"`
@@ -210,6 +223,7 @@ type NodeDetail struct {
 	BlockDevices    []BlockDeviceHardware  `json:"block_devices"`
 	RAIDControllers []RAIDControllerStatus `json:"raid_controllers"`
 	Temperatures    []TemperatureStatus    `json:"temperatures"`
+	HardwareSensors []HardwareSensorStatus `json:"hardware_sensors"`
 	GPUs            []GPUStatus            `json:"gpus"`
 	Filesystems     []FilesystemStatus     `json:"filesystems"`
 	Network         []NetworkStatus        `json:"network"`
@@ -309,10 +323,17 @@ func (store *Store) GetNode(ctx context.Context, nodeID string) (NodeDetail, err
 	if err != nil {
 		return NodeDetail{}, err
 	}
+	hardwareSensors := make([]HardwareSensorStatus, 0)
+	if summary.MachineType == "physical" {
+		hardwareSensors, err = store.listHardwareSensors(ctx, nodeID)
+		if err != nil {
+			return NodeDetail{}, err
+		}
+	}
 	return NodeDetail{
 		Node: summary, CPUPackages: cpuPackages, MemoryModules: memoryModules,
 		BlockDevices: blockDevices, RAIDControllers: raidControllers, Temperatures: temperatures,
-		GPUs: gpus, Filesystems: filesystems, Network: network,
+		HardwareSensors: hardwareSensors, GPUs: gpus, Filesystems: filesystems, Network: network,
 	}, nil
 }
 
@@ -780,6 +801,39 @@ const temperatureDetailSQL = `
 		              WHEN 'cpu' THEN 1 WHEN 'motherboard' THEN 2 WHEN 'gpu' THEN 3
 		              WHEN 'storage' THEN 4 ELSE 5
 		          END, label, sensor_key
+`
+
+func (store *Store) listHardwareSensors(ctx context.Context, nodeID string) ([]HardwareSensorStatus, error) {
+	rows, err := store.pool.Query(ctx, hardwareSensorDetailSQL, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("query hardware sensors: %w", err)
+	}
+	defer rows.Close()
+	result := make([]HardwareSensorStatus, 0)
+	for rows.Next() {
+		var item HardwareSensorStatus
+		if err := rows.Scan(
+			&item.Key, &item.SensorType, &item.Label, &item.BucketAt, &item.Value,
+			&item.MinValue, &item.MaxValue, &item.CriticalValue, &item.Alarm, &item.Fault,
+		); err != nil {
+			return nil, fmt.Errorf("scan hardware sensor: %w", err)
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+const hardwareSensorDetailSQL = `
+		SELECT metric.sensor_key, metric.sensor_type, metric.label, snapshot.bucket_at,
+		       metric.value, metric.min_value, metric.max_value, metric.critical_value,
+		       metric.alarm, metric.fault
+		  FROM monitoring.hardware_sensor_current_metrics metric
+		  JOIN monitoring.hardware_sensor_current_snapshots snapshot USING (node_id)
+		 WHERE metric.node_id = $1::uuid
+		 ORDER BY CASE metric.sensor_type
+		              WHEN 'fan' THEN 1 WHEN 'voltage' THEN 2
+		              WHEN 'current' THEN 3 ELSE 4
+		          END, metric.label, metric.sensor_key
 `
 
 func (store *Store) listGPUs(ctx context.Context, nodeID string) ([]GPUStatus, error) {

@@ -52,6 +52,7 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 	if err != nil {
 		return report.Report{}, fmt.Errorf("read hostname: %w", err)
 	}
+	machineType := classifyMachineType(hostInfo.VirtualizationRole)
 	cpuInventory, err := collectCPUInventory(ctx)
 	if err != nil {
 		return report.Report{}, err
@@ -105,6 +106,10 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 	}
 	gpus, gpuMetrics := collectNVIDIAGPUs(ctx)
 	temperatures := collectHWMONTemperatures("/sys/class/hwmon")
+	hardwareSensors := []report.HardwareSensorMetric(nil)
+	if machineType == "physical" {
+		hardwareSensors = collectHWMONSensors("/sys/class/hwmon")
+	}
 	for _, metric := range gpuMetrics {
 		if metric.TemperatureCelsius == nil {
 			continue
@@ -143,7 +148,7 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 			KernelVersion: hostInfo.KernelVersion,
 			Architecture:  runtime.GOARCH,
 			AgentVersion:  Version,
-			MachineType:   classifyMachineType(hostInfo.VirtualizationRole),
+			MachineType:   machineType,
 			SystemModel:   collectSystemModel(hostInfo.VirtualizationRole),
 			PrimaryIP:     preferredBridgeIPv4(networkInterfaces, isBridgeInterface),
 			Labels:        config.Labels,
@@ -178,6 +183,7 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 			Network:         networkMetrics,
 			GPUs:            gpuMetrics,
 			Temperatures:    temperatures,
+			HardwareSensors: hardwareSensors,
 			StorageHealth:   storageHealth,
 			RAIDControllers: raidControllers,
 		},

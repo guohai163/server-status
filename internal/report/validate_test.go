@@ -155,6 +155,11 @@ func TestReportValidationAcceptsHardwareHealthMetrics(t *testing.T) {
 	payload.Metrics.Temperatures = []TemperatureMetrics{{
 		Key: "coretemp:temp1", Component: "cpu", Label: "Package id 0", TemperatureCelsius: 52.5,
 	}}
+	fanMinimum := 1200.0
+	payload.Metrics.HardwareSensors = []HardwareSensorMetric{{
+		Key: "nct6775:fan1", SensorType: "fan", Label: "System Fan",
+		Value: 4200, MinValue: &fanMinimum,
+	}}
 	payload.Metrics.StorageHealth = []StorageHealth{{
 		BlockDeviceKey: "disk-1", SMARTAvailable: true, SMARTEnabled: true,
 		SMARTStatus: "passed", RiskLevel: "warning", RiskReasons: []string{"device_errors", "scsi_grown_defects"},
@@ -170,6 +175,23 @@ func TestReportValidationAcceptsHardwareHealthMetrics(t *testing.T) {
 	payload.Metrics.StorageHealth[0].BlockDeviceKey = "missing"
 	if err := payload.Validate(now); err == nil {
 		t.Fatal("storage health metric referencing an unknown disk was accepted")
+	}
+}
+
+func TestReportValidationRejectsInvalidHardwareSensor(t *testing.T) {
+	now := time.Now().UTC()
+	payload := validTestReport(t, now)
+	payload.Metrics.HardwareSensors = []HardwareSensorMetric{{
+		Key: "fan:broken", SensorType: "fan", Label: "Broken Fan", Value: -1,
+	}}
+	if err := payload.Validate(now); err == nil {
+		t.Fatal("negative fan speed was accepted")
+	}
+	payload.Metrics.HardwareSensors[0] = HardwareSensorMetric{
+		Key: "unknown:1", SensorType: "humidity", Label: "Humidity", Value: 50,
+	}
+	if err := payload.Validate(now); err == nil {
+		t.Fatal("unsupported hardware sensor type was accepted")
 	}
 }
 

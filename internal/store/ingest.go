@@ -213,6 +213,13 @@ func (store *Store) Ingest(ctx context.Context, auth NodeAuth, payload report.Re
 	if err := replaceTemperatureMetrics(ctx, tx, auth.NodeID, bucketAt, payload.CollectedAt.UTC(), receivedAt, payload.Metrics.Temperatures); err != nil {
 		return err
 	}
+	hardwareSensors := payload.Metrics.HardwareSensors
+	if payload.Agent.MachineType != "physical" {
+		hardwareSensors = nil
+	}
+	if err := replaceHardwareSensorMetrics(ctx, tx, auth.NodeID, bucketAt, payload.CollectedAt.UTC(), receivedAt, hardwareSensors); err != nil {
+		return err
+	}
 	if err := replaceStorageHealthMetrics(ctx, tx, auth.NodeID, bucketAt, payload.CollectedAt.UTC(), receivedAt, blockDeviceIDs, payload.Metrics.StorageHealth); err != nil {
 		return err
 	}
@@ -321,6 +328,38 @@ func replaceTemperatureMetrics(ctx context.Context, tx pgx.Tx, nodeID string, bu
 		`, nodeID, metric.Key, metric.Component, metric.Label, bucketAt, collectedAt, receivedAt,
 			metric.TemperatureCelsius, metric.HighCelsius, metric.CriticalCelsius); err != nil {
 			return fmt.Errorf("insert temperature metric %q: %w", metric.Key, err)
+		}
+	}
+	return nil
+}
+
+func replaceHardwareSensorMetrics(ctx context.Context, tx pgx.Tx, nodeID string, bucketAt, collectedAt, receivedAt time.Time, metrics []report.HardwareSensorMetric) error {
+	replace, err := currentSnapshotCanBeReplaced(ctx, tx, hardwareSensorSnapshotFreshnessSQL, nodeID, bucketAt)
+	if err != nil {
+		return fmt.Errorf("check hardware sensor metric freshness: %w", err)
+	}
+	if !replace {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM monitoring.hardware_sensor_current_snapshots WHERE node_id = $1::uuid`, nodeID); err != nil {
+		return fmt.Errorf("replace hardware sensor snapshot: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO monitoring.hardware_sensor_current_snapshots (
+			node_id, bucket_at, collected_at, received_at
+		) VALUES ($1::uuid, $2, $3, $4)
+	`, nodeID, bucketAt, collectedAt, receivedAt); err != nil {
+		return fmt.Errorf("insert hardware sensor snapshot: %w", err)
+	}
+	for _, metric := range metrics {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO monitoring.hardware_sensor_current_metrics (
+				node_id, sensor_key, sensor_type, label, value,
+				min_value, max_value, critical_value, alarm, fault
+			) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		`, nodeID, metric.Key, metric.SensorType, metric.Label, metric.Value,
+			metric.MinValue, metric.MaxValue, metric.CriticalValue, metric.Alarm, metric.Fault); err != nil {
+			return fmt.Errorf("insert hardware sensor metric %q: %w", metric.Key, err)
 		}
 	}
 	return nil
@@ -466,7 +505,13 @@ const temperatureSnapshotFreshnessSQL = `
 	SELECT NOT EXISTS (
 		SELECT 1 FROM monitoring.temperature_current_metrics
 		WHERE node_id = $1::uuid AND bucket_at > $2
-	)`
+		)`
+
+const hardwareSensorSnapshotFreshnessSQL = `
+	SELECT NOT EXISTS (
+		SELECT 1 FROM monitoring.hardware_sensor_current_snapshots
+		WHERE node_id = $1::uuid AND bucket_at > $2
+		)`
 
 const storageHealthSnapshotFreshnessSQL = `
 	SELECT NOT EXISTS (

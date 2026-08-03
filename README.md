@@ -25,6 +25,7 @@ macOS 11 及以上使用独立的零依赖 `zsh` Agent，通过系统自带命�
 | 类别 | 硬件/清单信息 | 每分钟运行指标 |
 | --- | --- | --- |
 | 服务器 | 实体机型号（SMBIOS Product Name / SKU） | -- |
+| 传感器 | -- | 实体机风扇转速、电压、电流、功率、阈值与告警状态 |
 | CPU | 厂商、型号、封装数、物理核心、逻辑线程 | 总使用率、1/5/15 分钟 load、温度 |
 | 内存 | 插槽、厂商、型号、序列号、类型、容量、速率 | 总量、已用、可用、缓存、buffer、swap |
 | 磁盘 / RAID | 设备名、厂商、型号、序列号、WWN、介质类型、容量、RAID 透传关系 | 挂载点容量和 inode、整机磁盘读写字节与 IOPS 增量、SMART 健康，以及 RAID 控制器、虚拟盘、物理槽位、接口、状态与重建进度 |
@@ -38,7 +39,7 @@ macOS 11 及以上使用独立的零依赖 `zsh` Agent，通过系统自带命�
 ### Agent
 
 1. 启动后立即采集一次，以后保持约 60 秒的采集起点间隔。
-2. 从 `/proc`、`/sys` 和系统 API 读取 CPU、内存、块设备、文件系统、网卡与 hwmon 温度；发现 `smartctl` 时额外采集直连盘和 RAID 透传成员盘的 SMART 状态，发现 StorCLI/PERCCLI 时读取 RAID 拓扑和重建状态。
+2. 从 `/proc`、`/sys` 和系统 API 读取 CPU、内存、块设备、文件系统、网卡与 hwmon 温度；实体机还从 hwmon 读取风扇转速、电压、电流和功率。发现 `smartctl` 时额外采集直连盘和 RAID 透传成员盘的 SMART 状态，发现 StorCLI/PERCCLI 时读取 RAID 拓扑和重建状态。
 3. 对硬件清单排序并计算 SHA-256 指纹。
 4. 计算网卡和磁盘累计计数与上一次采集值的差值；计数器重置时本次增量记为 0。
 5. 使用节点专属 Bearer Token 将完整 JSON 快照发送到中心 `/api/v1/reports`。
@@ -50,7 +51,7 @@ macOS 11 及以上使用独立的零依赖 `zsh` Agent，通过系统自带命�
 
 1. 对 Bearer Token 做 SHA-256 后查询数据库，原始 Token 不入库。
 2. 校验节点身份、JSON 字段、库存指纹、资源引用、时间窗口、百分比和 `bigint` 范围。
-3. 将节点信息、库存变化、分钟主快照、文件系统、网络、GPU、温度、SMART 和 RAID 当前状态放在同一个 PostgreSQL 事务中。
+3. 将节点信息、库存变化、分钟主快照、文件系统、网络、GPU、温度、实体机传感器、SMART 和 RAID 当前状态放在同一个 PostgreSQL 事务中。
 4. 使用 `(bucket_at, node_id)` 作为分钟幂等键，同一分钟重试只会覆盖，不会生成重复数据。
 5. 只有库存指纹变化时才更新硬件清单，并用 `first_seen_at`、`last_seen_at`、`removed_at` 保留设备变更历史。
 6. 数据库触发器维护 current 表，乱序的旧数据不能覆盖较新的当前状态。
@@ -60,7 +61,7 @@ macOS 11 及以上使用独立的零依赖 `zsh` Agent，通过系统自带命�
 
 ```mermaid
 flowchart TD
-    A["Agent 启动或进入下一分钟"] --> B["采集 CPU、内存、磁盘、温度、SMART、网卡、GPU 和 IP"]
+    A["Agent 启动或进入下一分钟"] --> B["采集 CPU、内存、磁盘、温度、实体机传感器、SMART、网卡、GPU 和 IP"]
     B --> C["排序硬件清单并计算 SHA-256 指纹"]
     C --> D["计算网络与磁盘区间增量并组装 JSON 快照"]
     D --> E["POST /api/v1/reports<br/>Bearer Node Token"]
@@ -167,6 +168,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V010__sas_health_counters.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V011__raid_controller_status.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V012__alert_events.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V013__cascade_node_deletion.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V014__hardware_sensor_metrics.sql
 ```
 
 中央服务应使用继承 `server_status_writer` 的独立登录角色，不要使用 PostgreSQL 超级用户。
@@ -200,13 +202,13 @@ curl http://127.0.0.1:8080/readyz
 
 中心容器使用非 root 用户、只读根文件系统、移除全部 capabilities，并配置 `unless-stopped` 自动恢复。Compose 会挂载独立的 `agent_release_cache` 持久卷，用于缓存 Agent Release 资产。
 
-部署完成后直接访问 `http://中心节点地址:8080/`。Web 看板不需要登录：首屏以卡片显示所有节点的机器名、IP、Tag、CPU、内存、磁盘使用率和磁盘读写速率，并可在页面顶部按 Tag 筛选；点击卡片进入硬件、文件系统、网卡和历史趋势详情，GPU 节点会按每张卡分别显示核心和显存使用率趋势。每个节点最多设置 5 个 Tag。使用 Admin Token 可从顶部导出全部机器的 Excel 清单，包含概览以及 CPU、内存、磁盘、文件系统、网卡和 GPU 明细。节点上报和管理接口仍分别使用 Node Token 与 Admin Token。浏览器在 Admin Token 成功通过鉴权后会将其保存到本地 30 天，期间添加节点、编辑 Tag、选择首页 IP 和导出无需重复填写；过期或接口返回 401 时自动清除。
+部署完成后直接访问 `http://中心节点地址:8080/`。Web 看板不需要登录：首屏以卡片显示所有节点的机器名、IP、Tag、CPU、内存、磁盘使用率和磁盘读写速率，并可在页面顶部按 Tag 筛选；点击卡片进入硬件、文件系统、网卡和历史趋势详情，GPU 节点会按每张卡分别显示核心和显存使用率趋势，实体机详情还会显示风扇、电压、电流和功率传感器。每个节点最多设置 5 个 Tag。使用 Admin Token 可从顶部导出全部机器的 Excel 清单，包含概览以及 CPU、内存、磁盘、文件系统、网卡和 GPU 明细。节点上报和管理接口仍分别使用 Node Token 与 Admin Token。浏览器在 Admin Token 成功通过鉴权后会将其保存到本地 30 天，期间添加节点、编辑 Tag、选择首页 IP 和导出无需重复填写；过期或接口返回 401 时自动清除。
 
 ## 一个脚本部署 Agent
 
 目标节点不需要 Go、make、Python、Git 仓库或 SSH 服务，只需 Linux、`sudo`、`curl`、`crontab` 和 `sha256sum`。当前发布支持 `amd64/x86_64` 与 `arm64/aarch64`。
 
-温度从 Linux hwmon 读取，不增加依赖。SMART 与 RAID 控制器透传是可选增强能力，需要目标节点安装 smartmontools 7.0 及以上，并让 Agent 以 root 运行；缺少 `smartctl`、设备不支持 SMART 或控制器/驱动不支持透传时，其他指标仍会正常上报，详情页显示 SMART 未采集。Agent 使用 `smartctl --scan-open --json` 获取每块盘所需的设备类型，因此支持 smartmontools 能识别的 MegaRAID、AACRAID、Areca、3ware、HighPoint、CCISS 和 SSSRAID 透传路径，不需要在 Agent 配置中手工枚举槽位。smartmontools 7.2 及以上还会为 SAS 盘上报 grown defect、ECC 纠错和 non-medium 错误累计值；中心依据前后两份已接收快照计算后两项的增量，避免把多年累计值直接判为当前风险。
+温度以及实体机的风扇转速、电压、电流和功率从 Linux hwmon 读取，不增加依赖。传感器模块只在实体机详情展示；虚拟机不采集也不展示。SMART 与 RAID 控制器透传是可选增强能力，需要目标节点安装 smartmontools 7.0 及以上，并让 Agent 以 root 运行；缺少 `smartctl`、设备不支持 SMART 或控制器/驱动不支持透传时，其他指标仍会正常上报，详情页显示 SMART 未采集。Agent 使用 `smartctl --scan-open --json` 获取每块盘所需的设备类型，因此支持 smartmontools 能识别的 MegaRAID、AACRAID、Areca、3ware、HighPoint、CCISS 和 SSSRAID 透传路径，不需要在 Agent 配置中手工枚举槽位。smartmontools 7.2 及以上还会为 SAS 盘上报 grown defect、ECC 纠错和 non-medium 错误累计值；中心依据前后两份已接收快照计算后两项的增量，避免把多年累计值直接判为当前风险。
 
 Linux Agent 还会自动查找 `storcli64`、`storcli`、`perccli64` 或 `perccli`。发现工具后通过 JSON 输出采集控制器、磁盘组、虚拟盘和物理槽位状态；只有物理盘处于 `Rbld` 时才额外查询重建百分比。没有管理工具或命令执行失败时不会影响其他指标，详情页不显示 RAID 控制器区块。
 

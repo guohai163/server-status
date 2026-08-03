@@ -175,4 +175,9 @@ func TestNodeDetailQueriesIncludeHardwareHealth(t *testing.T) {
 			t.Errorf("temperature detail query does not contain %q", fragment)
 		}
 	}
+	for _, fragment := range []string{"monitoring.hardware_sensor_current_metrics", "hardware_sensor_current_snapshots", "sensor_type", "critical_value", "metric.fault"} {
+		if !strings.Contains(hardwareSensorDetailSQL, fragment) {
+			t.Errorf("hardware sensor detail query does not contain %q", fragment)
+		}
+	}
 }
