@@ -73,6 +73,7 @@ func collectKVMVirtualMachines(ctx context.Context) ([]report.KVMVirtualMachine,
 	defer cancel()
 	run := func(ctx context.Context, arguments ...string) ([]byte, error) {
 		command := exec.CommandContext(ctx, path, arguments...)
+		isolateKVMCommand(command)
 		command.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
 		return command.Output()
 	}

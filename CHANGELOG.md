@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v0.23.2 - 2026-08-07
+
+### Fixed
+- Run libvirt `virsh` collection in an isolated session so an interactive PolicyKit helper cannot suspend the Agent and make a KVM node appear offline.
+- Start Linux Agents through `setsid` so installer and compatibility deployments do not retain the invoking SSH terminal across automatic updates.
+
 ## v0.23.1 - 2026-08-06
 
 ### Fixed

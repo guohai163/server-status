@@ -20,7 +20,7 @@ require_command() {
 [ "$(id -u)" -eq 0 ] || fail "run this installer through sudo or as root"
 [ "$(uname -s)" = "Linux" ] || fail "only Linux is supported"
 
-for command_name in curl crontab sha256sum awk sed grep pgrep pkill nohup mktemp tail; do
+for command_name in curl crontab sha256sum awk sed grep pgrep pkill nohup setsid mktemp tail; do
   require_command "$command_name"
 done
 
@@ -108,7 +108,7 @@ set -a
 . /opt/server-agent/agent.env
 set +a
 
-exec /opt/server-agent/server-status-agent
+exec setsid /opt/server-agent/server-status-agent
 RUNNER
 chmod 0755 "$runner_new"
 

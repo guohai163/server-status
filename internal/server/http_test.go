@@ -503,7 +503,8 @@ func TestAgentInstallerIsServedWithoutCaching(t *testing.T) {
 		"x86_64|amd64", "aarch64|arm64",
 		"/agent/releases/latest", "/agent/releases/v$version",
 		"server-status-agent-linux-$architecture", "checksums.txt",
-		"central release cache", "/opt/server-agent", "# server-status-agent-managed",
+		"central release cache", "/opt/server-agent", "exec setsid /opt/server-agent/server-status-agent",
+		"# server-status-agent-managed",
 	} {
 		if !bytes.Contains(response.Body.Bytes(), []byte(expected)) {
 			t.Fatalf("installer response does not contain %q", expected)

@@ -11,4 +11,4 @@ set -a
 . "$CONFIG_FILE"
 set +a
 
-exec "$HOME/.local/lib/server-status-agent/server-status-agent"
+exec setsid "$HOME/.local/lib/server-status-agent/server-status-agent"
