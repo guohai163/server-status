@@ -181,3 +181,14 @@ func TestNodeDetailQueriesIncludeHardwareHealth(t *testing.T) {
 		}
 	}
 }
+
+func TestNodeDetailQueryIncludesKVMVirtualMachines(t *testing.T) {
+	for _, fragment := range []string{
+		"monitoring.kvm_virtual_machines", "domain_uuid", "vcpu_count",
+		"memory_bytes", "disk_bytes", "os_name", "architecture", "removed_at IS NULL",
+	} {
+		if !strings.Contains(kvmVirtualMachineDetailSQL, fragment) {
+			t.Errorf("KVM virtual machine detail query does not contain %q", fragment)
+		}
+	}
+}

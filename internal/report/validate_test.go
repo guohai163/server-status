@@ -17,7 +17,12 @@ func TestInventoryFingerprintIsOrderIndependent(t *testing.T) {
 			Key: "eth0", Name: "eth0",
 			Addresses: []NetworkAddress{{Address: "2001:db8::1/64", Scope: "global"}, {Address: "10.0.0.1/24", Scope: "private"}},
 		}},
-		GPUs: []GPU{{Key: "GPU-b", UUID: "GPU-b", ModelName: "GPU B", Index: 1, MemoryTotalBytes: 2000}, {Key: "GPU-a", UUID: "GPU-a", ModelName: "GPU A", Index: 0, MemoryTotalBytes: 1000}},
+		GPUs:                  []GPU{{Key: "GPU-b", UUID: "GPU-b", ModelName: "GPU B", Index: 1, MemoryTotalBytes: 2000}, {Key: "GPU-a", UUID: "GPU-a", ModelName: "GPU A", Index: 0, MemoryTotalBytes: 1000}},
+		KVMInventoryCollected: true,
+		KVMVirtualMachines: []KVMVirtualMachine{
+			{Key: "vm-b", UUID: "vm-b", Name: "VM B", State: "running", VCPUs: 2, MemoryBytes: 2000},
+			{Key: "vm-a", UUID: "vm-a", Name: "VM A", State: "shut off", VCPUs: 1, MemoryBytes: 1000},
+		},
 	}
 	second := Inventory{
 		Filesystems: []Filesystem{
@@ -28,7 +33,12 @@ func TestInventoryFingerprintIsOrderIndependent(t *testing.T) {
 			Key: "eth0", Name: "eth0",
 			Addresses: []NetworkAddress{{Address: "10.0.0.1/24", Scope: "private"}, {Address: "2001:db8::1/64", Scope: "global"}},
 		}},
-		GPUs: []GPU{{Key: "GPU-a", UUID: "GPU-a", ModelName: "GPU A", Index: 0, MemoryTotalBytes: 1000}, {Key: "GPU-b", UUID: "GPU-b", ModelName: "GPU B", Index: 1, MemoryTotalBytes: 2000}},
+		GPUs:                  []GPU{{Key: "GPU-a", UUID: "GPU-a", ModelName: "GPU A", Index: 0, MemoryTotalBytes: 1000}, {Key: "GPU-b", UUID: "GPU-b", ModelName: "GPU B", Index: 1, MemoryTotalBytes: 2000}},
+		KVMInventoryCollected: true,
+		KVMVirtualMachines: []KVMVirtualMachine{
+			{Key: "vm-a", UUID: "vm-a", Name: "VM A", State: "shut off", VCPUs: 1, MemoryBytes: 1000},
+			{Key: "vm-b", UUID: "vm-b", Name: "VM B", State: "running", VCPUs: 2, MemoryBytes: 2000},
+		},
 	}
 	firstDigest, err := InventoryFingerprint(first)
 	if err != nil {
@@ -50,6 +60,30 @@ func TestEmptyGPUInventoryRemainsWireCompatible(t *testing.T) {
 	}
 	if strings.Contains(string(encoded), "gpus") {
 		t.Fatalf("empty GPU inventory must be omitted from legacy fingerprints: %s", encoded)
+	}
+	if strings.Contains(string(encoded), "kvm_inventory") || strings.Contains(string(encoded), "kvm_virtual_machines") {
+		t.Fatalf("empty KVM inventory must be omitted for legacy agents: %s", encoded)
+	}
+}
+
+func TestReportValidationAcceptsKVMVirtualMachines(t *testing.T) {
+	now := time.Now().UTC()
+	payload := validTestReport(t, now)
+	payload.Inventory.KVMInventoryCollected = true
+	payload.Inventory.KVMVirtualMachines = []KVMVirtualMachine{{
+		Key: "4f08a52f-2f2e-4cb9-b12b-2692f8cdd463", UUID: "4f08a52f-2f2e-4cb9-b12b-2692f8cdd463",
+		Name: "web-01", State: "running", VCPUs: 4, MemoryBytes: 8 << 30, DiskBytes: 80 << 30,
+		OSName: "Ubuntu 24.04 LTS", OSType: "hvm", Architecture: "x86_64", MachineType: "pc-q35-8.2",
+	}}
+	payload.InventoryFingerprint, _ = InventoryFingerprint(payload.Inventory)
+	if err := payload.Validate(now); err != nil {
+		t.Fatalf("valid KVM inventory rejected: %v", err)
+	}
+
+	payload.Inventory.KVMInventoryCollected = false
+	payload.InventoryFingerprint, _ = InventoryFingerprint(payload.Inventory)
+	if err := payload.Validate(now); err == nil {
+		t.Fatal("KVM inventory without a successful collection marker was accepted")
 	}
 }
 

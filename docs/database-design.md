@@ -21,6 +21,7 @@ erDiagram
     NODES ||--o{ FILESYSTEMS : mounts
     NODES ||--o{ NETWORK_INTERFACES : owns
     NODES ||--o{ GPU_DEVICES : owns
+    NODES ||--o{ KVM_VIRTUAL_MACHINES : hosts
     NODES ||--o| NODE_NETWORK_PREFERENCES : configures
     NETWORK_INTERFACES ||--o| NODE_NETWORK_PREFERENCES : selected_by
     NETWORK_INTERFACES ||--o{ NETWORK_ADDRESSES : has
@@ -66,6 +67,7 @@ erDiagram
 | `network_addresses` | PostgreSQL `inet` 格式的 IPv4/IPv6 地址及作用域 |
 | `node_network_preferences` | 首页卡片 IP 来源网卡；每个节点最多选择一个 |
 | `gpu_devices` | NVIDIA GPU UUID、设备索引、型号和显存容量 |
+| `kvm_virtual_machines` | libvirt 域 UUID、名称、状态、vCPU、配置内存、虚拟磁盘容量和客户机系统信息 |
 | `temperature_current_metrics` | CPU、主板、GPU、存储及其他 hwmon 传感器的最新温度和阈值 |
 | `hardware_sensor_current_snapshots` | 实体机最新通用传感器快照的采集时间和乱序保护边界，包括空快照 |
 | `hardware_sensor_current_metrics` | 实体机最新风扇转速、电压、电流、功率、阈值与告警/故障状态 |
@@ -119,6 +121,7 @@ NVIDIA GPU 由 Agent 调用 `nvidia-smi` 识别，以 GPU UUID 作为稳定清�
 - `v_filesystem_status`：所有有效挂载点的最新容量和 inode 使用情况。
 - `v_network_status`：所有有效网卡、IPv4/IPv6 地址、链路状态、当前流量和错误计数。
 - GPU 详情查询：有效 GPU 清单关联 `gpu_current_metrics`，按设备索引逐卡返回；历史查询按设备关联分钟或小时表，逐卡返回核心和显存使用率序列，并与节点历史使用相同时间桶。
+- KVM 详情查询：只返回 `removed_at IS NULL` 的 libvirt 域，按名称和 UUID 排序；未成功采集 KVM 清单的报告不会移除已有域记录。
 
 首页节点查询优先从 `node_network_preferences` 指定的有效网卡选择地址，再按地址作用域、IPv4/IPv6 family 和 PostgreSQL `inet` 值确定该网卡内的展示 IP。未设置偏好，或所选网卡被移除、暂无地址时，查询回退到所有有效网卡的自动选址；节点列表按最终展示 IP 的 `inet` 值排序，无 IP 的节点排在最后。
 
@@ -154,7 +157,7 @@ SELECT monitoring.rollup_hour($1::timestamptz);
 
 ## 部署与验证
 
-迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好，`V005` 增加 NVIDIA GPU 清单和当前指标，`V006` 增加每节点最多 5 个管理员 Tag，`V007` 增加逐 GPU 分钟历史、小时汇总与 current 同步触发器，`V008` 增加 ARM 性能核与能效核拓扑，`V009` 增加温度与 SMART 当前快照，`V010` 增加 SAS 缺陷、ECC 与 non-medium 计数及增量，`V011` 增加 RAID 控制器、虚拟盘、物理盘和重建状态，`V012` 增加持久化告警事件与清理函数，`V013` 修正资源历史外键，使节点及其全部关联记录可完整级联删除，`V014` 增加实体机 hwmon 通用传感器当前快照。在连接信息由环境或 `.pgpass` 提供的前提下执行：
+迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好，`V005` 增加 NVIDIA GPU 清单和当前指标，`V006` 增加每节点最多 5 个管理员 Tag，`V007` 增加逐 GPU 分钟历史、小时汇总与 current 同步触发器，`V008` 增加 ARM 性能核与能效核拓扑，`V009` 增加温度与 SMART 当前快照，`V010` 增加 SAS 缺陷、ECC 与 non-medium 计数及增量，`V011` 增加 RAID 控制器、虚拟盘、物理盘和重建状态，`V012` 增加持久化告警事件与清理函数，`V013` 修正资源历史外键，使节点及其全部关联记录可完整级联删除，`V014` 增加实体机 hwmon 通用传感器当前快照，`V015` 增加 libvirt KVM 虚拟机清单与变更历史。在连接信息由环境或 `.pgpass` 提供的前提下执行：
 
 ```bash
 psql -v ON_ERROR_STOP=1 -f db/migrations/V001__monitoring_schema.sql
@@ -171,6 +174,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V011__raid_controller_status.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V012__alert_events.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V013__cascade_node_deletion.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V014__hardware_sensor_metrics.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V015__kvm_virtual_machines.sql
 psql -v ON_ERROR_STOP=1 -f db/verify/V001__verify.sql
 ```
 

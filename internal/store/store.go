@@ -86,14 +86,14 @@ func (store *Store) Ready(ctx context.Context) error {
 	var exists bool
 	err := store.pool.QueryRow(ctx, `
 		SELECT EXISTS (
-				SELECT 1 FROM monitoring.schema_migrations WHERE version = 'V014'
+				SELECT 1 FROM monitoring.schema_migrations WHERE version = 'V015'
 		)
 	`).Scan(&exists)
 	if err != nil {
 		return fmt.Errorf("check database schema: %w", err)
 	}
 	if !exists {
-		return errors.New("database schema migration V014 is not installed")
+		return errors.New("database schema migration V015 is not installed")
 	}
 	return nil
 }

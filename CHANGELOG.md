@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v0.23.0 - 2026-08-06
+
+### Added
+- Discover libvirt KVM domains from Linux agents and persist their name, UUID, state, vCPU, configured memory, virtual disk capacity, guest operating system, architecture, and machine type as change-tracked inventory.
+- Show active KVM virtual machines in node details, while preserving previously reported inventory when `virsh` is unavailable or a critical domain query fails.
+
 ## v0.22.1 - 2026-08-06
 
 ### Fixed

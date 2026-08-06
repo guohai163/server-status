@@ -67,7 +67,7 @@ func (r *Report) Validate(now time.Time) error {
 }
 
 func validateInventory(inventory Inventory) error {
-	if len(inventory.CPUPackages) > 1024 || len(inventory.MemoryModules) > 4096 || len(inventory.BlockDevices) > 4096 || len(inventory.Filesystems) > 4096 || len(inventory.NetworkInterfaces) > 4096 || len(inventory.GPUs) > 1024 {
+	if len(inventory.CPUPackages) > 1024 || len(inventory.MemoryModules) > 4096 || len(inventory.BlockDevices) > 4096 || len(inventory.Filesystems) > 4096 || len(inventory.NetworkInterfaces) > 4096 || len(inventory.GPUs) > 1024 || len(inventory.KVMVirtualMachines) > 4096 {
 		return errors.New("inventory contains too many resources")
 	}
 	if err := uniqueKeys("CPU package", len(inventory.CPUPackages), func(i int) string { return inventory.CPUPackages[i].Key }); err != nil {
@@ -139,6 +139,20 @@ func validateInventory(inventory Inventory) error {
 	for _, item := range inventory.GPUs {
 		if item.Index < 0 || strings.TrimSpace(item.UUID) == "" || strings.TrimSpace(item.ModelName) == "" || item.MemoryTotalBytes == 0 || item.MemoryTotalBytes > math.MaxInt64 {
 			return fmt.Errorf("invalid GPU %q", item.Key)
+		}
+	}
+	if !inventory.KVMInventoryCollected && len(inventory.KVMVirtualMachines) > 0 {
+		return errors.New("KVM virtual machines require kvm_inventory_collected")
+	}
+	if err := uniqueKeys("KVM virtual machine", len(inventory.KVMVirtualMachines), func(i int) string {
+		return inventory.KVMVirtualMachines[i].Key
+	}); err != nil {
+		return err
+	}
+	for _, item := range inventory.KVMVirtualMachines {
+		if strings.TrimSpace(item.UUID) == "" || strings.TrimSpace(item.Name) == "" || strings.TrimSpace(item.State) == "" ||
+			item.VCPUs < 1 || item.MemoryBytes == 0 || item.MemoryBytes > math.MaxInt64 || item.DiskBytes > math.MaxInt64 {
+			return fmt.Errorf("invalid KVM virtual machine %q", item.Key)
 		}
 	}
 	return nil

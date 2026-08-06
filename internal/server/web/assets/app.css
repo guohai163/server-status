@@ -297,6 +297,7 @@ button { color: inherit; }
 .raid-rebuild strong { display: block; margin-bottom: 5px; color: var(--ink); font-size: 11px; }
 .raid-rebuild small, .raid-progress-pending { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; white-space: normal; }
 .gpu-section .data-table { min-width: 660px; }
+.kvm-section .data-table { min-width: 780px; }
 .gpu-section .data-table th:nth-child(1) { width: 36%; }
 .gpu-section .data-table th:nth-child(2), .gpu-section .data-table th:nth-child(3) { width: 20%; }
 .gpu-model { width: 100%; max-width: 100%; display: inline-flex; align-items: center; gap: 9px; }

@@ -686,6 +686,24 @@ func TestWebUIPrioritizesReportedSMARTStatus(t *testing.T) {
 	}
 }
 
+func TestWebUIShowsKVMVirtualMachineInventory(t *testing.T) {
+	api, _ := testAPI()
+	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /assets/app.js returned %d", response.Code)
+	}
+	for _, fragment := range []string{
+		"detail.kvm_virtual_machines", "function kvmSection(items)", "KVM 虚拟机",
+		"名称 / UUID", "item.vcpus", "item.memory_bytes", "item.disk_bytes", "item.os_name",
+	} {
+		if !strings.Contains(response.Body.String(), fragment) {
+			t.Errorf("KVM inventory UI does not contain %q", fragment)
+		}
+	}
+}
+
 func TestWebUIShowsRAIDControllerTopologyAndRebuildProgress(t *testing.T) {
 	api, _ := testAPI()
 	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)

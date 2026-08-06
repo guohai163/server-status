@@ -25,7 +25,7 @@ curl http://10.12.54.200:8080/readyz
 
 数据库使用专用登录角色 `server_status_app`，该角色只继承 `server_status_writer`，没有超级用户、建库或建角色权限。
 
-升级时使用迁移账号按顺序执行尚未安装的迁移，当前最新为 `db/migrations/V014__hardware_sensor_metrics.sql`。中央服务启动时只校验 V014 是否存在，不会使用运行时 writer 账号自动修改 schema。
+升级时使用迁移账号按顺序执行尚未安装的迁移，当前最新为 `db/migrations/V015__kvm_virtual_machines.sql`。中央服务启动时只校验 V015 是否存在，不会使用运行时 writer 账号自动修改 schema。
 
 中心服务启动后每分钟评估一次离线、文件系统容量、归一化负载、SMART、RAID 和温度告警，多实例通过 PostgreSQL advisory lock 避免重复写入。每小时维护任务同时删除恢复时间超过 365 天的告警，未恢复事件不会被清理。
 
@@ -62,6 +62,8 @@ sudo ipmitool -I open sensor list
 SMART 是可选能力：安装 smartmontools 7.0 及以上后，root Agent 会通过 `smartctl --scan-open --json` 自动发现直连盘和受支持 RAID 控制器后的物理成员盘。缺少工具、SMART 不可用或控制器不支持透传不会使 Agent 上报失败。旧版用户目录 Agent 通常没有读取 SMART/RAID ioctl 的权限，应迁移为当前 root 安装方式后再启用。
 
 RAID 控制器拓扑也是可选能力。Linux Agent 会自动发现 PATH 中的 `storcli64`、`storcli`、`perccli64` 或 `perccli`，并兼容 `/usr/local/bin/storcli64`、`/opt/MegaRAID/storcli/storcli64` 和 `/opt/MegaRAID/perccli/perccli64`。工具可用时详情页显示控制器、虚拟盘、物理盘接口与状态；处于重建状态的盘还显示百分比和控制器返回的预计剩余时间。
+
+KVM 虚拟机清单依赖 libvirt 的 `virsh`。root Agent 能连接默认 libvirt URI 时会自动采集全部域；如需客户机发行版名称，还应在虚拟机内安装并启用 QEMU Guest Agent。`virsh list --all --uuid` 无权限或关键域查询失败时，本轮 KVM 清单不会覆盖中心已有数据。
 
 Windows Agent 首次安装和执行 `upgrade` 时会从中心 Release 接口自动下载经过校验的 smartmontools 7.5 安装器，只提取 `smartctl`、驱动数据库和许可证文档到 Agent 目录。目标 Windows 节点不访问 GitHub；下载失败时保留已有工具并继续上报非 SMART 指标。
 

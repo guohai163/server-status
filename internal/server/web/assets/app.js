@@ -418,6 +418,7 @@
       ${metricTile("运行时间", formatDuration(node.uptime_seconds), `${escapeHTML(node.os_name)} ${escapeHTML(node.os_version)}`)}
     </div>
     ${gpuSection(detail.gpus)}
+    ${kvmSection(detail.kvm_virtual_machines)}
     ${temperatureSection(detail.temperatures)}
     ${isPhysicalNode(node) ? hardwareSensorSection(detail.hardware_sensors) : ""}
     ${raidSection(detail.raid_controllers)}
@@ -645,6 +646,31 @@
     if (!items || !items.length) return "";
     const rows = items.map((item) => `<tr><td><span class="gpu-model"><img class="nvidia-icon" src="/assets/nvidia.svg" alt=""><span><strong>GPU ${item.index}</strong><small>${escapeHTML(item.model_name)}</small></span></span></td><td><span class="gpu-cell-label">GPU 使用率</span>${gpuMeter(item.utilization_percent)}</td><td><span class="gpu-cell-label">显存使用率</span>${gpuMeter(item.memory_usage_percent)}</td><td><span class="gpu-cell-label">显存</span>${formatBytes(item.memory_used_bytes)} / ${formatBytes(item.memory_total_bytes)}</td></tr>`);
     return `<section class="section gpu-section"><div class="section-head"><div><h2>GPU</h2><p>${items.length} 张 NVIDIA GPU 的当前负载</p></div></div>${table(["设备", "GPU 使用率", "显存使用率", "显存"], rows)}</section>`;
+  }
+  function kvmStateBadge(state) {
+    const normalized = String(state || "").trim().toLowerCase();
+    const states = {
+      running: { label: "运行中", level: "healthy" },
+      idle: { label: "空闲", level: "healthy" },
+      paused: { label: "已暂停", level: "warning" },
+      "in shutdown": { label: "关机中", level: "warning" },
+      shutdown: { label: "已关机", level: "unknown" },
+      "shut off": { label: "已关闭", level: "unknown" },
+      pmsuspended: { label: "已休眠", level: "unknown" },
+      crashed: { label: "已崩溃", level: "critical" },
+      blocked: { label: "阻塞", level: "critical" }
+    };
+    const meta = states[normalized] || { label: state || "未知", level: "unknown" };
+    return `<span class="health-badge ${meta.level}">${escapeHTML(meta.label)}</span>`;
+  }
+  function kvmSection(items) {
+    if (!items || !items.length) return "";
+    const rows = items.map((item) => {
+      const system = item.os_name || item.os_type || "--";
+      const platform = [item.architecture, item.machine_type].filter(Boolean).join(" · ");
+      return `<tr><td><strong>${escapeHTML(item.name)}</strong><small class="table-subline"><code>${escapeHTML(item.uuid)}</code></small></td><td>${kvmStateBadge(item.state)}</td><td>${item.vcpus} vCPU</td><td>${formatBytes(item.memory_bytes)}</td><td>${item.disk_bytes ? formatBytes(item.disk_bytes) : "--"}</td><td>${escapeHTML(system)}${platform ? `<small class="table-subline">${escapeHTML(platform)}</small>` : ""}</td></tr>`;
+    });
+    return `<section class="section kvm-section"><div class="section-head"><div><h2>KVM 虚拟机</h2><p>${items.length} 台 libvirt 虚拟机</p></div></div>${table(["名称 / UUID", "状态", "CPU", "内存", "磁盘", "系统"], rows)}</section>`;
   }
   function temperatureSection(items) {
     const componentLabels = { cpu: "CPU", motherboard: "主板", gpu: "GPU", storage: "硬盘", other: "其他" };

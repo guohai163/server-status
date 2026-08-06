@@ -105,6 +105,7 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 		return report.Report{}, err
 	}
 	gpus, gpuMetrics := collectNVIDIAGPUs(ctx)
+	kvmVirtualMachines, kvmInventoryCollected := collectKVMVirtualMachines(ctx)
 	temperatures := collectHWMONTemperatures("/sys/class/hwmon")
 	hardwareSensors := []report.HardwareSensorMetric(nil)
 	if machineType == "physical" {
@@ -154,12 +155,14 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 			Labels:        config.Labels,
 		},
 		Inventory: report.Inventory{
-			CPUPackages:       cpuInventory,
-			MemoryModules:     memoryModules,
-			BlockDevices:      blockDevices,
-			Filesystems:       filesystems,
-			NetworkInterfaces: networkInterfaces,
-			GPUs:              gpus,
+			CPUPackages:           cpuInventory,
+			MemoryModules:         memoryModules,
+			BlockDevices:          blockDevices,
+			Filesystems:           filesystems,
+			NetworkInterfaces:     networkInterfaces,
+			GPUs:                  gpus,
+			KVMInventoryCollected: kvmInventoryCollected,
+			KVMVirtualMachines:    kvmVirtualMachines,
 		},
 		Metrics: report.Metrics{
 			CPU: report.CPUMetrics{

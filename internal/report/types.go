@@ -39,12 +39,28 @@ type AgentInfo struct {
 }
 
 type Inventory struct {
-	CPUPackages       []CPUPackage       `json:"cpu_packages"`
-	MemoryModules     []MemoryModule     `json:"memory_modules"`
-	BlockDevices      []BlockDevice      `json:"block_devices"`
-	Filesystems       []Filesystem       `json:"filesystems"`
-	NetworkInterfaces []NetworkInterface `json:"network_interfaces"`
-	GPUs              []GPU              `json:"gpus,omitempty"`
+	CPUPackages           []CPUPackage        `json:"cpu_packages"`
+	MemoryModules         []MemoryModule      `json:"memory_modules"`
+	BlockDevices          []BlockDevice       `json:"block_devices"`
+	Filesystems           []Filesystem        `json:"filesystems"`
+	NetworkInterfaces     []NetworkInterface  `json:"network_interfaces"`
+	GPUs                  []GPU               `json:"gpus,omitempty"`
+	KVMInventoryCollected bool                `json:"kvm_inventory_collected,omitempty"`
+	KVMVirtualMachines    []KVMVirtualMachine `json:"kvm_virtual_machines,omitempty"`
+}
+
+type KVMVirtualMachine struct {
+	Key          string `json:"key"`
+	UUID         string `json:"uuid"`
+	Name         string `json:"name"`
+	State        string `json:"state"`
+	VCPUs        int    `json:"vcpus"`
+	MemoryBytes  uint64 `json:"memory_bytes"`
+	DiskBytes    uint64 `json:"disk_bytes"`
+	OSName       string `json:"os_name,omitempty"`
+	OSType       string `json:"os_type,omitempty"`
+	Architecture string `json:"architecture,omitempty"`
+	MachineType  string `json:"machine_type,omitempty"`
 }
 
 type GPU struct {

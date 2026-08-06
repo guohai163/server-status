@@ -14,6 +14,9 @@ func NormalizeInventory(inventory *Inventory) {
 	sort.Slice(inventory.Filesystems, func(i, j int) bool { return inventory.Filesystems[i].Key < inventory.Filesystems[j].Key })
 	sort.Slice(inventory.NetworkInterfaces, func(i, j int) bool { return inventory.NetworkInterfaces[i].Key < inventory.NetworkInterfaces[j].Key })
 	sort.Slice(inventory.GPUs, func(i, j int) bool { return inventory.GPUs[i].Key < inventory.GPUs[j].Key })
+	sort.Slice(inventory.KVMVirtualMachines, func(i, j int) bool {
+		return inventory.KVMVirtualMachines[i].Key < inventory.KVMVirtualMachines[j].Key
+	})
 	for i := range inventory.Filesystems {
 		sort.Strings(inventory.Filesystems[i].MountOptions)
 	}

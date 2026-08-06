@@ -216,17 +216,31 @@ type GPUStatus struct {
 	MemoryUsagePercent float64    `json:"memory_usage_percent"`
 }
 
+type KVMVirtualMachine struct {
+	UUID         string `json:"uuid"`
+	Name         string `json:"name"`
+	State        string `json:"state"`
+	VCPUs        int    `json:"vcpus"`
+	MemoryBytes  int64  `json:"memory_bytes"`
+	DiskBytes    int64  `json:"disk_bytes"`
+	OSName       string `json:"os_name,omitempty"`
+	OSType       string `json:"os_type,omitempty"`
+	Architecture string `json:"architecture,omitempty"`
+	MachineType  string `json:"machine_type,omitempty"`
+}
+
 type NodeDetail struct {
-	Node            NodeSummary            `json:"node"`
-	CPUPackages     []CPUHardware          `json:"cpu_packages"`
-	MemoryModules   []MemoryHardware       `json:"memory_modules"`
-	BlockDevices    []BlockDeviceHardware  `json:"block_devices"`
-	RAIDControllers []RAIDControllerStatus `json:"raid_controllers"`
-	Temperatures    []TemperatureStatus    `json:"temperatures"`
-	HardwareSensors []HardwareSensorStatus `json:"hardware_sensors"`
-	GPUs            []GPUStatus            `json:"gpus"`
-	Filesystems     []FilesystemStatus     `json:"filesystems"`
-	Network         []NetworkStatus        `json:"network"`
+	Node               NodeSummary            `json:"node"`
+	CPUPackages        []CPUHardware          `json:"cpu_packages"`
+	MemoryModules      []MemoryHardware       `json:"memory_modules"`
+	BlockDevices       []BlockDeviceHardware  `json:"block_devices"`
+	RAIDControllers    []RAIDControllerStatus `json:"raid_controllers"`
+	Temperatures       []TemperatureStatus    `json:"temperatures"`
+	HardwareSensors    []HardwareSensorStatus `json:"hardware_sensors"`
+	GPUs               []GPUStatus            `json:"gpus"`
+	KVMVirtualMachines []KVMVirtualMachine    `json:"kvm_virtual_machines"`
+	Filesystems        []FilesystemStatus     `json:"filesystems"`
+	Network            []NetworkStatus        `json:"network"`
 }
 
 type HistoryPoint struct {
@@ -319,6 +333,10 @@ func (store *Store) GetNode(ctx context.Context, nodeID string) (NodeDetail, err
 	if err != nil {
 		return NodeDetail{}, err
 	}
+	kvmVirtualMachines, err := store.listKVMVirtualMachines(ctx, nodeID)
+	if err != nil {
+		return NodeDetail{}, err
+	}
 	temperatures, err := store.listTemperatures(ctx, nodeID)
 	if err != nil {
 		return NodeDetail{}, err
@@ -333,9 +351,38 @@ func (store *Store) GetNode(ctx context.Context, nodeID string) (NodeDetail, err
 	return NodeDetail{
 		Node: summary, CPUPackages: cpuPackages, MemoryModules: memoryModules,
 		BlockDevices: blockDevices, RAIDControllers: raidControllers, Temperatures: temperatures,
-		HardwareSensors: hardwareSensors, GPUs: gpus, Filesystems: filesystems, Network: network,
+		HardwareSensors: hardwareSensors, GPUs: gpus, KVMVirtualMachines: kvmVirtualMachines,
+		Filesystems: filesystems, Network: network,
 	}, nil
 }
+
+func (store *Store) listKVMVirtualMachines(ctx context.Context, nodeID string) ([]KVMVirtualMachine, error) {
+	rows, err := store.pool.Query(ctx, kvmVirtualMachineDetailSQL, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("query KVM virtual machines: %w", err)
+	}
+	defer rows.Close()
+	result := make([]KVMVirtualMachine, 0)
+	for rows.Next() {
+		var item KVMVirtualMachine
+		if err := rows.Scan(&item.UUID, &item.Name, &item.State, &item.VCPUs,
+			&item.MemoryBytes, &item.DiskBytes, &item.OSName, &item.OSType,
+			&item.Architecture, &item.MachineType); err != nil {
+			return nil, fmt.Errorf("scan KVM virtual machine: %w", err)
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+const kvmVirtualMachineDetailSQL = `
+	SELECT domain_uuid, name, state, vcpu_count, memory_bytes, disk_bytes,
+	       COALESCE(os_name, ''), COALESCE(os_type, ''),
+	       COALESCE(architecture, ''), COALESCE(machine_type, '')
+	  FROM monitoring.kvm_virtual_machines
+	 WHERE node_id = $1::uuid AND removed_at IS NULL
+	 ORDER BY name, domain_uuid
+`
 
 const nodeListOrderSQL = `
 	 ORDER BY CASE WHEN primary_address.is_preferred THEN primary_address.sort_address

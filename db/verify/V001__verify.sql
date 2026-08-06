@@ -262,6 +262,20 @@ INSERT INTO monitoring.gpu_devices (
      'GPU-verify-1', 1, 'GPU-verify-1', 'NVIDIA Verify GPU 1', 25769803776,
      CURRENT_TIMESTAMP - INTERVAL '1 day', CURRENT_TIMESTAMP);
 
+INSERT INTO monitoring.kvm_virtual_machines (
+    id, node_id, hardware_key, domain_uuid, name, state, vcpu_count,
+    memory_bytes, disk_bytes, os_name, os_type, architecture, machine_type,
+    first_seen_at, last_seen_at
+) VALUES (
+    'c0000000-0000-0000-0000-000000000001',
+    '10000000-0000-0000-0000-000000000001',
+    '4f08a52f-2f2e-4cb9-b12b-2692f8cdd463',
+    '4f08a52f-2f2e-4cb9-b12b-2692f8cdd463',
+    'verify-kvm-01', 'running', 4, 8589934592, 85899345920,
+    'Ubuntu 24.04 LTS', 'hvm', 'x86_64', 'pc-q35-8.2',
+    CURRENT_TIMESTAMP - INTERVAL '1 day', CURRENT_TIMESTAMP
+);
+
 INSERT INTO monitoring.node_metric_samples (
     bucket_at, node_id, collected_at, interval_seconds,
     cpu_usage_percent, load_1, load_5, load_15,
@@ -528,6 +542,21 @@ BEGIN
         RAISE EXCEPTION 'per-device GPU metrics are incomplete: %', v_count;
     END IF;
 
+    IF NOT EXISTS (
+        SELECT 1
+          FROM monitoring.kvm_virtual_machines
+         WHERE node_id = '10000000-0000-0000-0000-000000000001'
+           AND removed_at IS NULL
+           AND name = 'verify-kvm-01'
+           AND state = 'running'
+           AND vcpu_count = 4
+           AND memory_bytes = 8589934592
+           AND disk_bytes = 85899345920
+           AND os_name = 'Ubuntu 24.04 LTS'
+    ) THEN
+        RAISE EXCEPTION 'KVM virtual machine inventory was not persisted';
+    END IF;
+
     SELECT memory_used_bytes::numeric * 100 / memory_total_bytes INTO v_number
       FROM monitoring.gpu_devices gpu
       JOIN monitoring.gpu_current_metrics metric
@@ -671,8 +700,8 @@ DECLARE
     v_count integer;
     v_severity text;
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM monitoring.schema_migrations WHERE version = 'V014') THEN
-        RAISE EXCEPTION 'V014 migration history entry is missing';
+    IF NOT EXISTS (SELECT 1 FROM monitoring.schema_migrations WHERE version = 'V015') THEN
+        RAISE EXCEPTION 'V015 migration history entry is missing';
     END IF;
     IF NOT EXISTS (
         SELECT 1
@@ -847,8 +876,12 @@ BEGIN
     IF NOT has_table_privilege('server_status_writer', 'monitoring.node_network_preferences', 'INSERT') THEN
         RAISE EXCEPTION 'writer role lacks INSERT on dashboard network preferences';
     END IF;
-    IF NOT has_table_privilege('server_status_writer', 'monitoring.gpu_metric_samples', 'INSERT') THEN
-        RAISE EXCEPTION 'writer role lacks INSERT on GPU raw metrics';
+	IF NOT has_table_privilege('server_status_writer', 'monitoring.gpu_metric_samples', 'INSERT') THEN
+		RAISE EXCEPTION 'writer role lacks INSERT on GPU raw metrics';
+	END IF;
+    IF NOT has_table_privilege('server_status_writer', 'monitoring.kvm_virtual_machines', 'INSERT') OR
+       NOT has_table_privilege('server_status_writer', 'monitoring.kvm_virtual_machines', 'UPDATE') THEN
+        RAISE EXCEPTION 'writer role lacks KVM inventory privileges';
     END IF;
     IF NOT has_table_privilege('server_status_writer', 'monitoring.temperature_current_metrics', 'INSERT') OR
        NOT has_table_privilege('server_status_writer', 'monitoring.storage_health_current_metrics', 'INSERT') OR
@@ -867,8 +900,12 @@ BEGIN
        NOT has_function_privilege('server_status_writer', 'monitoring.prune_resolved_alert_events(timestamptz)', 'EXECUTE') THEN
         RAISE EXCEPTION 'writer role lacks alert lifecycle privileges';
     END IF;
-    IF has_table_privilege('server_status_reader', 'monitoring.gpu_metric_samples', 'INSERT') THEN
-        RAISE EXCEPTION 'reader role can modify GPU raw metrics';
+	IF has_table_privilege('server_status_reader', 'monitoring.gpu_metric_samples', 'INSERT') THEN
+		RAISE EXCEPTION 'reader role can modify GPU raw metrics';
+	END IF;
+    IF has_table_privilege('server_status_reader', 'monitoring.kvm_virtual_machines', 'INSERT') OR
+       NOT has_table_privilege('server_status_reader', 'monitoring.kvm_virtual_machines', 'SELECT') THEN
+        RAISE EXCEPTION 'reader role KVM inventory privileges are incorrect';
     END IF;
     IF has_table_privilege('server_status_reader', 'monitoring.temperature_current_metrics', 'INSERT') OR
        has_table_privilege('server_status_reader', 'monitoring.storage_health_current_metrics', 'INSERT') OR
@@ -928,6 +965,17 @@ VALUES (
     '80000000-0000-0000-0000-000000000003'
 );
 
+INSERT INTO monitoring.kvm_virtual_machines (
+    node_id, hardware_key, domain_uuid, name, state, vcpu_count,
+    memory_bytes, disk_bytes, first_seen_at, last_seen_at
+) VALUES (
+    '10000000-0000-0000-0000-000000000003',
+    '94448f2d-f641-4ec4-b092-ff3940be6792',
+    '94448f2d-f641-4ec4-b092-ff3940be6792',
+    'writer-kvm', 'shut off', 2, 4294967296, 42949672960,
+    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+);
+
 INSERT INTO monitoring.node_metric_samples (
     bucket_at, node_id, collected_at, interval_seconds,
     cpu_usage_percent, memory_total_bytes, memory_used_bytes,
@@ -968,13 +1016,21 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'writer role could not persist dashboard network preference';
     END IF;
-    IF NOT EXISTS (
-        SELECT 1
-          FROM monitoring.nodes
+	IF NOT EXISTS (
+		SELECT 1
+		  FROM monitoring.nodes
          WHERE id = '10000000-0000-0000-0000-000000000003'
            AND tags = ARRAY['writer-managed']
     ) THEN
-        RAISE EXCEPTION 'writer role could not update node tags';
+		RAISE EXCEPTION 'writer role could not update node tags';
+	END IF;
+    IF NOT EXISTS (
+        SELECT 1
+          FROM monitoring.kvm_virtual_machines
+         WHERE node_id = '10000000-0000-0000-0000-000000000003'
+           AND name = 'writer-kvm'
+    ) THEN
+        RAISE EXCEPTION 'writer role could not persist KVM inventory';
     END IF;
     IF NOT EXISTS (
         SELECT 1
@@ -1048,6 +1104,9 @@ BEGIN
          WHERE node_id = '10000000-0000-0000-0000-000000000001'
     ) OR EXISTS (
         SELECT 1 FROM monitoring.gpu_metric_samples
+         WHERE node_id = '10000000-0000-0000-0000-000000000001'
+    ) OR EXISTS (
+        SELECT 1 FROM monitoring.kvm_virtual_machines
          WHERE node_id = '10000000-0000-0000-0000-000000000001'
     ) OR EXISTS (
         SELECT 1 FROM monitoring.hardware_sensor_current_snapshots

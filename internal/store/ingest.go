@@ -552,6 +552,55 @@ func syncInventory(ctx context.Context, tx pgx.Tx, nodeID string, inventory repo
 	if err := syncGPUs(ctx, tx, nodeID, inventory.GPUs, observedAt); err != nil {
 		return err
 	}
+	if inventory.KVMInventoryCollected {
+		if err := syncKVMVirtualMachines(ctx, tx, nodeID, inventory.KVMVirtualMachines, observedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func syncKVMVirtualMachines(ctx context.Context, tx pgx.Tx, nodeID string, items []report.KVMVirtualMachine, at time.Time) error {
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		keys = append(keys, item.Key)
+		result, err := tx.Exec(ctx, `
+			UPDATE monitoring.kvm_virtual_machines SET
+				domain_uuid = $3, name = $4, state = $5, vcpu_count = $6,
+				memory_bytes = $7, disk_bytes = $8, os_name = NULLIF($9, ''),
+				os_type = NULLIF($10, ''), architecture = NULLIF($11, ''),
+				machine_type = NULLIF($12, ''), last_seen_at = $13
+			WHERE node_id = $1::uuid AND hardware_key = $2 AND removed_at IS NULL
+		`, nodeID, item.Key, item.UUID, item.Name, item.State, item.VCPUs,
+			i64(item.MemoryBytes), i64(item.DiskBytes), item.OSName, item.OSType,
+			item.Architecture, item.MachineType, at)
+		if err != nil {
+			return fmt.Errorf("update KVM virtual machine %q: %w", item.Key, err)
+		}
+		if result.RowsAffected() == 0 {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO monitoring.kvm_virtual_machines (
+					node_id, hardware_key, domain_uuid, name, state, vcpu_count,
+					memory_bytes, disk_bytes, os_name, os_type, architecture,
+					machine_type, first_seen_at, last_seen_at
+				) VALUES (
+					$1::uuid, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, ''),
+					NULLIF($10, ''), NULLIF($11, ''), NULLIF($12, ''), $13, $13
+				)
+			`, nodeID, item.Key, item.UUID, item.Name, item.State, item.VCPUs,
+				i64(item.MemoryBytes), i64(item.DiskBytes), item.OSName, item.OSType,
+				item.Architecture, item.MachineType, at); err != nil {
+				return fmt.Errorf("insert KVM virtual machine %q: %w", item.Key, err)
+			}
+		}
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE monitoring.kvm_virtual_machines SET removed_at = $3
+		WHERE node_id = $1::uuid AND removed_at IS NULL
+		  AND NOT (hardware_key = ANY($2::text[]))
+	`, nodeID, keys, at); err != nil {
+		return fmt.Errorf("remove missing KVM virtual machines: %w", err)
+	}
 	return nil
 }
 
