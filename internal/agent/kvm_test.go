@@ -49,7 +49,10 @@ func TestCollectKVMVirtualMachinesWithVirsh(t *testing.T) {
 			return []byte("running\n"), nil
 		case "domblkinfo":
 			return []byte("Capacity:       53687091200\nAllocation:     10737418240\n"), nil
-		case "domguestinfo":
+		case "guestinfo":
+			if len(arguments) != 3 || arguments[2] != "--os" {
+				return nil, errors.New("unexpected guestinfo arguments")
+			}
 			return []byte("os.id          : ubuntu\nos.pretty-name : Ubuntu 22.04.4 LTS\n"), nil
 		default:
 			return nil, errors.New("unexpected command")

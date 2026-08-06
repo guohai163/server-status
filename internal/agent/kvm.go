@@ -113,7 +113,7 @@ func collectKVMVirtualMachinesWithVirsh(ctx context.Context, run virshCommand) (
 			item.DiskBytes += capacity
 		}
 
-		if guestOutput, guestErr := run(ctx, "domguestinfo", identifier, "--os"); guestErr == nil {
+		if guestOutput, guestErr := run(ctx, "guestinfo", identifier, "--os"); guestErr == nil {
 			item.OSName = parseLibvirtGuestOS(string(guestOutput))
 		}
 		if item.OSName == "" {

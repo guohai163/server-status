@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v0.23.1 - 2026-08-06
+
+### Fixed
+- Call the valid libvirt `virsh guestinfo <domain> --os` command so QEMU Guest Agent operating-system details can be collected when available.
+
 ## v0.23.0 - 2026-08-06
 
 ### Added
