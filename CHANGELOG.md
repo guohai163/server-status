@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v0.22.1 - 2026-08-06
+
+### Fixed
+- Run cascading node deletion as a tracked background task so large metric histories no longer exceed the HTTP write timeout and surface as Nginx 502 responses.
+
 ## v0.22.0 - 2026-08-03
 
 ### Added

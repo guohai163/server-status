@@ -266,7 +266,8 @@ macOS 节点在“添加节点”中选择 `macOS 11 及以上`。生成的命�
 | `POST` | `/api/v1/admin/nodes` | Admin Token | 注册节点或轮换节点 Token |
 | `GET` | `/api/v1/admin/nodes` | Admin Token | 查询节点状态列表 |
 | `GET` | `/api/v1/admin/nodes/{node_id}` | Admin Token | 查询节点、文件系统和网卡详情 |
-| `DELETE` | `/api/v1/admin/nodes/{node_id}` | Admin Token | 永久删除节点及其凭据、清单、指标和告警 |
+| `DELETE` | `/api/v1/admin/nodes/{node_id}` | Admin Token | 受理后台删除任务，返回 `202 Accepted` 和任务状态地址 |
+| `GET` | `/api/v1/admin/node-deletions/{node_id}` | Admin Token | 查询后台删除任务的 `queued/running/completed/failed` 状态 |
 | `PUT` | `/api/v1/admin/nodes/{node_id}/primary-network-interface` | Admin Token | 设置首页卡片 IP 使用的网络接口 |
 
 所有受保护接口使用：
@@ -274,6 +275,8 @@ macOS 节点在“添加节点”中选择 `macOS 11 及以上`。生成的命�
 ```http
 Authorization: Bearer <token>
 ```
+
+节点删除会在中心进程内异步执行，最长运行 10 分钟。重复提交同一节点不会并行启动多个删除任务；失败任务可以重新提交。中心服务关闭时会取消仍在运行的删除任务，重启后可再次提交。
 
 ## 运行检查
 

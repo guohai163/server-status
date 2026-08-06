@@ -966,6 +966,29 @@
       error.status = response.status;
       throw error;
     }
+    const task = await response.json();
+    const statusURL = response.headers.get("Location") || task.status_url;
+    if (!statusURL) throw new Error("删除任务缺少状态地址");
+
+    let status = task;
+    while (status.status !== "completed") {
+      if (status.status === "failed") throw new Error(status.error || "后台删除失败");
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const statusResponse = await fetch(statusURL, {
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`
+        }
+      });
+      if (!statusResponse.ok) {
+        let message = `查询删除状态失败 (${statusResponse.status})`;
+        try { message = (await statusResponse.json()).error || message; } catch (_) { /* response is not JSON */ }
+        const error = new Error(message);
+        error.status = statusResponse.status;
+        throw error;
+      }
+      status = await statusResponse.json();
+    }
   }
 
   async function submitDeleteNode(event) {

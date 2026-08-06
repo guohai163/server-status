@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -43,6 +44,27 @@ type fakeStore struct {
 	alerts                      store.AlertList
 	alertsErr                   error
 	alertOptions                store.AlertListOptions
+}
+
+type controlledDeleteStore struct {
+	*fakeStore
+	started chan string
+	release chan struct{}
+	result  error
+	calls   atomic.Int32
+}
+
+func (store *controlledDeleteStore) DeleteNode(ctx context.Context, nodeID string) error {
+	store.calls.Add(1)
+	store.started <- nodeID
+	if store.release != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-store.release:
+		}
+	}
+	return store.result
 }
 
 func (fake *fakeStore) Ready(context.Context) error { return nil }
@@ -339,7 +361,13 @@ func TestWebDashboardDeletesNodesThroughAdminAPI(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected dashboard script to return 200, got %d", response.Code)
 	}
-	for _, fragment := range []string{`data-delete-node`, `method: "DELETE"`, `Authorization: ` + "`Bearer ${token}`"} {
+	for _, fragment := range []string{
+		`data-delete-node`,
+		`method: "DELETE"`,
+		`Authorization: ` + "`Bearer ${token}`",
+		`response.headers.get("Location")`,
+		`status.status !== "completed"`,
+	} {
 		if !strings.Contains(response.Body.String(), fragment) {
 			t.Errorf("dashboard node deletion script does not contain %q", fragment)
 		}
@@ -791,31 +819,137 @@ func TestDeleteNodeRequiresAdminToken(t *testing.T) {
 	}
 }
 
-func TestDeleteNodeRemovesRequestedNode(t *testing.T) {
-	api, database := testAPI()
+func TestDeleteNodeEnqueuesRequestedNode(t *testing.T) {
+	database := &controlledDeleteStore{
+		fakeStore: &fakeStore{},
+		started:   make(chan string, 1),
+		release:   make(chan struct{}),
+	}
+	api := testAPIWithStore(database)
+	defer api.Close()
 	nodeID := "10000000-0000-4000-8000-000000000001"
 	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/nodes/"+nodeID, nil)
 	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d: %s", response.Code, response.Body.String())
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", response.Code, response.Body.String())
 	}
-	if database.deletedNodeID != nodeID {
-		t.Fatalf("deleted node %q, want %q", database.deletedNodeID, nodeID)
+	statusURL := "/api/v1/admin/node-deletions/" + nodeID
+	if location := response.Header().Get("Location"); location != statusURL {
+		t.Fatalf("deletion location %q, want %q", location, statusURL)
+	}
+	var accepted nodeDeletionTask
+	if err := json.Unmarshal(response.Body.Bytes(), &accepted); err != nil {
+		t.Fatalf("decode accepted deletion: %v", err)
+	}
+	if accepted.NodeID != nodeID || accepted.Status != "queued" || accepted.StatusURL != statusURL {
+		t.Fatalf("unexpected accepted deletion: %+v", accepted)
+	}
+
+	select {
+	case deletedNodeID := <-database.started:
+		if deletedNodeID != nodeID {
+			t.Fatalf("deleted node %q, want %q", deletedNodeID, nodeID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("background deletion did not start")
+	}
+
+	statusRequest := httptest.NewRequest(http.MethodGet, statusURL, nil)
+	statusRequest.Header.Set("Authorization", "Bearer "+testAdminToken)
+	statusResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(statusResponse, statusRequest)
+	if statusResponse.Code != http.StatusOK {
+		t.Fatalf("expected deletion status 200, got %d: %s", statusResponse.Code, statusResponse.Body.String())
+	}
+	var running nodeDeletionTask
+	if err := json.Unmarshal(statusResponse.Body.Bytes(), &running); err != nil {
+		t.Fatalf("decode running deletion: %v", err)
+	}
+	if running.Status != "running" || running.StartedAt == nil {
+		t.Fatalf("unexpected running deletion: %+v", running)
+	}
+
+	close(database.release)
+	completed := waitForNodeDeletionStatus(t, api, nodeID, "completed")
+	if completed.FinishedAt == nil || completed.Error != "" {
+		t.Fatalf("unexpected completed deletion: %+v", completed)
 	}
 }
 
-func TestDeleteNodeReturnsNotFound(t *testing.T) {
-	api, database := testAPI()
-	database.deleteNodeErr = store.ErrNotFound
-	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/nodes/10000000-0000-4000-8000-000000000001", nil)
+func TestDeleteNodeDeduplicatesActiveTask(t *testing.T) {
+	database := &controlledDeleteStore{
+		fakeStore: &fakeStore{},
+		started:   make(chan string, 2),
+		release:   make(chan struct{}),
+	}
+	api := testAPIWithStore(database)
+	defer api.Close()
+	nodeID := "10000000-0000-4000-8000-000000000001"
+
+	for range 2 {
+		request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/nodes/"+nodeID, nil)
+		request.Header.Set("Authorization", "Bearer "+testAdminToken)
+		response := httptest.NewRecorder()
+		api.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusAccepted {
+			t.Fatalf("expected 202, got %d: %s", response.Code, response.Body.String())
+		}
+	}
+
+	select {
+	case <-database.started:
+	case <-time.After(time.Second):
+		t.Fatal("background deletion did not start")
+	}
+	if calls := database.calls.Load(); calls != 1 {
+		t.Fatalf("expected one background deletion, got %d", calls)
+	}
+	close(database.release)
+	waitForNodeDeletionStatus(t, api, nodeID, "completed")
+}
+
+func TestDeleteNodeRecordsBackgroundFailure(t *testing.T) {
+	database := &controlledDeleteStore{
+		fakeStore: &fakeStore{},
+		started:   make(chan string, 1),
+		result:    errors.New("database unavailable"),
+	}
+	api := testAPIWithStore(database)
+	defer api.Close()
+	nodeID := "10000000-0000-4000-8000-000000000001"
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/nodes/"+nodeID, nil)
 	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d: %s", response.Code, response.Body.String())
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", response.Code, response.Body.String())
 	}
+
+	failed := waitForNodeDeletionStatus(t, api, nodeID, "failed")
+	if failed.Error != "cannot delete node" || failed.FinishedAt == nil {
+		t.Fatalf("unexpected failed deletion: %+v", failed)
+	}
+}
+
+func TestDeleteNodeTreatsAlreadyAbsentNodeAsCompleted(t *testing.T) {
+	database := &controlledDeleteStore{
+		fakeStore: &fakeStore{},
+		started:   make(chan string, 1),
+		result:    store.ErrNotFound,
+	}
+	api := testAPIWithStore(database)
+	defer api.Close()
+	nodeID := "10000000-0000-4000-8000-000000000001"
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/nodes/"+nodeID, nil)
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", response.Code, response.Body.String())
+	}
+	waitForNodeDeletionStatus(t, api, nodeID, "completed")
 }
 
 func TestDeleteNodeRejectsInvalidNodeID(t *testing.T) {
@@ -960,8 +1094,27 @@ func testAPI() (*API, *fakeStore) {
 		NodeID:  "10000000-0000-4000-8000-000000000001",
 		AgentID: "20000000-0000-4000-8000-000000000001",
 	}}
+	return testAPIWithStore(database), database
+}
+
+func testAPIWithStore(database dataStore) *API {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewAPI(database, testAdminToken, logger, ""), database
+	return NewAPI(database, testAdminToken, logger, "")
+}
+
+func waitForNodeDeletionStatus(t *testing.T, api *API, nodeID, want string) nodeDeletionTask {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		task, ok := api.nodeDeletions.Status(nodeID)
+		if ok && task.Status == want {
+			return task
+		}
+		time.Sleep(time.Millisecond)
+	}
+	task, _ := api.nodeDeletions.Status(nodeID)
+	t.Fatalf("deletion status %q, want %q", task.Status, want)
+	return nodeDeletionTask{}
 }
 
 func validHTTPTestReport(t *testing.T) report.Report {

@@ -25,6 +25,7 @@ type API struct {
 	adminDigest        [32]byte
 	releases           *releaseCache
 	historyResponses   *historyResponseCache
+	nodeDeletions      *nodeDeletionManager
 	latestAgentVersion string
 	mux                *http.ServeMux
 }
@@ -46,12 +47,14 @@ type dataStore interface {
 
 func NewAPI(database dataStore, adminToken string, logger *slog.Logger, releaseCacheDir string) *API {
 	latestAgentVersion, _ := appversion.Normalize(Version)
+	historyResponses := newHistoryResponseCache(30*time.Second, 256)
 	api := &API{
 		store:              database,
 		logger:             logger,
 		adminDigest:        sha256.Sum256([]byte(adminToken)),
 		releases:           newReleaseCache(releaseCacheDir, logger),
-		historyResponses:   newHistoryResponseCache(30*time.Second, 256),
+		historyResponses:   historyResponses,
+		nodeDeletions:      newNodeDeletionManager(database, logger, historyResponses.invalidateNode),
 		latestAgentVersion: latestAgentVersion,
 		mux:                http.NewServeMux(),
 	}
@@ -68,6 +71,7 @@ func NewAPI(database dataStore, adminToken string, logger *slog.Logger, releaseC
 	api.mux.HandleFunc("GET /api/v1/admin/nodes/export", api.requireAdmin(api.exportNodes))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes/{nodeID}", api.requireAdmin(api.getNode))
 	api.mux.HandleFunc("DELETE /api/v1/admin/nodes/{nodeID}", api.requireAdmin(api.deleteNode))
+	api.mux.HandleFunc("GET /api/v1/admin/node-deletions/{nodeID}", api.requireAdmin(api.getNodeDeletion))
 	api.mux.HandleFunc("PUT /api/v1/admin/nodes/{nodeID}/primary-network-interface", api.requireAdmin(api.setPrimaryNetworkInterface))
 	api.mux.HandleFunc("PUT /api/v1/admin/nodes/{nodeID}/tags", api.requireAdmin(api.updateNodeTags))
 	api.mux.HandleFunc("GET /agent/releases/{version}/{asset}", api.releaseAsset)
@@ -77,6 +81,10 @@ func NewAPI(database dataStore, adminToken string, logger *slog.Logger, releaseC
 
 func (api *API) Handler() http.Handler {
 	return api.securityHeaders(api.logging(api.mux))
+}
+
+func (api *API) Close() {
+	api.nodeDeletions.Close()
 }
 
 func (api *API) health(response http.ResponseWriter, _ *http.Request) {
@@ -337,17 +345,31 @@ func (api *API) deleteNode(response http.ResponseWriter, request *http.Request) 
 		writeError(response, http.StatusBadRequest, "invalid node id")
 		return
 	}
-	ctx, cancel := contextWithTimeout(request, 30*time.Second)
-	defer cancel()
-	if err := api.store.DeleteNode(ctx, nodeID); errors.Is(err, store.ErrNotFound) {
-		writeError(response, http.StatusNotFound, "node not found")
-		return
-	} else if err != nil {
-		api.logger.Error("delete node failed", "node_id", nodeID, "error", err)
-		writeError(response, http.StatusInternalServerError, "cannot delete node")
+	task, ok := api.nodeDeletions.Enqueue(nodeID)
+	if !ok {
+		writeError(response, http.StatusServiceUnavailable, "node deletion service is shutting down")
 		return
 	}
-	response.WriteHeader(http.StatusNoContent)
+	statusURL := "/api/v1/admin/node-deletions/" + nodeID
+	task.StatusURL = statusURL
+	response.Header().Set("Location", statusURL)
+	response.Header().Set("Retry-After", "1")
+	writeJSON(response, http.StatusAccepted, task)
+}
+
+func (api *API) getNodeDeletion(response http.ResponseWriter, request *http.Request) {
+	nodeID := request.PathValue("nodeID")
+	if !report.ValidUUID(nodeID) {
+		writeError(response, http.StatusBadRequest, "invalid node id")
+		return
+	}
+	task, ok := api.nodeDeletions.Status(nodeID)
+	if !ok {
+		writeError(response, http.StatusNotFound, "node deletion not found")
+		return
+	}
+	task.StatusURL = "/api/v1/admin/node-deletions/" + nodeID
+	writeJSON(response, http.StatusOK, task)
 }
 
 type primaryNetworkInterfaceInput struct {

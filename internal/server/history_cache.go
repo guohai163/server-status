@@ -145,6 +145,16 @@ func (cache *historyResponseCache) store(key string, response cachedHistoryRespo
 	cache.entries[key] = response
 }
 
+func (cache *historyResponseCache) invalidateNode(nodeID string) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	for key := range cache.entries {
+		if strings.HasPrefix(key, nodeID+":") {
+			delete(cache.entries, key)
+		}
+	}
+}
+
 func writeHistoryResponse(response http.ResponseWriter, request *http.Request, cached cachedHistoryResponse, cacheHit bool) {
 	response.Header().Set("Content-Type", "application/json")
 	response.Header().Set("Cache-Control", "public, max-age=30, stale-while-revalidate=30")

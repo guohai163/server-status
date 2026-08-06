@@ -31,6 +31,7 @@ func main() {
 	defer database.Close()
 
 	api := appserver.NewAPI(database, config.AdminToken, logger, config.ReleaseCacheDir)
+	defer api.Close()
 	httpServer := &http.Server{
 		Addr:              config.ListenAddress,
 		Handler:           api.Handler(),
