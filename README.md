@@ -86,7 +86,7 @@ flowchart TD
 
 ## 数据保留与状态
 
-- 分钟原始数据：按 UTC 天分区，保留 90 天。
+- 分钟原始数据：按 UTC 天分区，保留 7 天。
 - 小时汇总：按 UTC 月分区，保留 24 个月。
 - 当前状态：每个节点、文件系统、网卡或 GPU 只保留一条最新记录，列表查询不扫描历史表。
 - 连续 3 分钟没有成功上报的节点显示为 `offline`。
@@ -170,6 +170,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V012__alert_events.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V013__cascade_node_deletion.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V014__hardware_sensor_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V015__kvm_virtual_machines.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V016__raw_metric_retention.sql
 ```
 
 中央服务应使用继承 `server_status_writer` 的独立登录角色，不要使用 PostgreSQL 超级用户。

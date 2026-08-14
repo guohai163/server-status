@@ -13,8 +13,12 @@ SELECT monitoring.ensure_hourly_partitions(
 
 -- Create deliberately expired partitions, then prove the retention routine removes them.
 SELECT monitoring.ensure_raw_partitions(
-    (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - 92,
-    (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - 91
+    (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - 8,
+    (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - 7
+);
+SELECT monitoring.ensure_raw_partitions(
+    (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - 7,
+    (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - 6
 );
 SELECT monitoring.ensure_hourly_partitions(
     (date_trunc('month', CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '26 months')::date,
@@ -27,7 +31,11 @@ DECLARE
     v_fk_count integer;
     v_old_raw_name text := format(
         'monitoring.node_metric_samples_p%s',
-        to_char((CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - 92, 'YYYYMMDD')
+        to_char((CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - 8, 'YYYYMMDD')
+    );
+    v_retained_raw_name text := format(
+        'monitoring.node_metric_samples_p%s',
+        to_char((CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - 7, 'YYYYMMDD')
     );
     v_old_hourly_name text := format(
         'monitoring.node_metric_hourly_p%s',
@@ -46,6 +54,9 @@ BEGIN
     END IF;
     IF to_regclass(v_current_raw_name) IS NULL THEN
         RAISE EXCEPTION 'current raw partition was removed unexpectedly: %', v_current_raw_name;
+    END IF;
+    IF to_regclass(v_retained_raw_name) IS NULL THEN
+        RAISE EXCEPTION 'seven-day raw partition was removed unexpectedly: %', v_retained_raw_name;
     END IF;
 
     SELECT count(*)
@@ -700,8 +711,8 @@ DECLARE
     v_count integer;
     v_severity text;
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM monitoring.schema_migrations WHERE version = 'V015') THEN
-        RAISE EXCEPTION 'V015 migration history entry is missing';
+    IF NOT EXISTS (SELECT 1 FROM monitoring.schema_migrations WHERE version = 'V016') THEN
+        RAISE EXCEPTION 'V016 migration history entry is missing';
     END IF;
     IF NOT EXISTS (
         SELECT 1

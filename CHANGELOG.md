@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Changed
+- Retain raw node, filesystem, network, and GPU metric partitions for 7 days instead of 90 days; hourly rollups remain available for 24 months.
+
 ## v0.23.2 - 2026-08-07
 
 ### Fixed
