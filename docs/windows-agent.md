@@ -50,7 +50,7 @@ Release 工作流会先用当前 Go 构建 Linux Agent，再切换到 Go 1.20.14
 2. 目标平台选择 Windows Server 2008 R2+ 64 位。
 3. 在目标机器以管理员身份打开命令提示符或 PowerShell，执行看板生成的单行命令。
 
-生成的命令会显式调用系统自带的 `powershell.exe`，在同一个进程内通过 `.NET WebClient` 下载到当前目录、启动 Agent 并检查安装退出码，因此可以从命令提示符或 PowerShell 一次粘贴执行。等效的安装调用为：
+生成的命令会显式调用系统自带的 `powershell.exe`，启用 TLS 1.2，并在同一个进程内通过 `.NET WebClient` 下载到当前目录、启动 Agent 并检查安装退出码，因此可以从命令提示符或 PowerShell 一次粘贴执行。下载或安装失败时命令会立即停止。等效的安装调用为：
 
 ```bat
 .\server-status-agent.exe install --server "http://central:8080" --id "AGENT_UUID" --token "NODE_TOKEN" --environment "production"
@@ -78,7 +78,7 @@ server-status-agent.exe remove
 server-status-agent.exe remove --purge
 ```
 
-已有 Windows 节点可以在中心看板的节点详情页点击“更新 Agent”，复制并以管理员身份执行生成的单行命令。命令在同一个 `powershell.exe` 进程内通过 `.NET WebClient` 下载中心缓存的最新 Windows Agent，不依赖已弃用的 BITSAdmin，然后执行：
+已有 Windows 节点可以在中心看板的节点详情页点击“更新 Agent”，复制并以管理员身份执行生成的单行命令。命令会显式启用 TLS 1.2，在同一个 `powershell.exe` 进程内通过 `.NET WebClient` 下载中心缓存的最新 Windows Agent，不依赖已弃用的 BITSAdmin，然后执行：
 
 ```bat
 server-status-agent-upgrade.exe upgrade

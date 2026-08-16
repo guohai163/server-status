@@ -1069,7 +1069,11 @@
   }
 
   function buildWindowsPowerShellCommand(statements) {
-    return `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "${statements.join("; ")}"`;
+    const preamble = [
+      `Set-Variable -Name ErrorActionPreference -Value 'Stop'`,
+      `[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072`
+    ];
+    return `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "${preamble.concat(statements).join("; ")}"`;
   }
 
   function buildInstallCommand(credentials, environment, version, platform) {
@@ -1114,8 +1118,7 @@
     const runUpgrade = buildWindowsProcessStatement(filename, ["upgrade"], "Windows Agent upgrade failed");
     return buildWindowsPowerShellCommand([
       deleteUpgradeFile,
-      buildWindowsDownloadStatement(downloadURL, filename),
-      `try { ${runUpgrade} } finally { ${deleteUpgradeFile} }`
+      `try { ${buildWindowsDownloadStatement(downloadURL, filename)}; ${runUpgrade} } finally { ${deleteUpgradeFile} }`
     ]);
   }
 

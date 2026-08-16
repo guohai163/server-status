@@ -586,7 +586,8 @@ func TestWebUIIncludesWindowsAgentUpgradeCommand(t *testing.T) {
 			"data-agent-upgrade", "server-status-agent-upgrade.exe", "Get-Variable -Name LASTEXITCODE",
 			"System.IO.File]::Delete", "Windows Agent upgrade failed",
 			"powershell.exe -NoLogo -NoProfile -NonInteractive", "System.Net.WebClient",
-			"System.Environment]::CurrentDirectory",
+			"System.Environment]::CurrentDirectory", "Set-Variable -Name ErrorActionPreference -Value 'Stop'",
+			"System.Net.ServicePointManager]::SecurityProtocol -bor 3072",
 		},
 	} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
@@ -635,6 +636,13 @@ func TestWebUIBuildsAtomicWindowsCommands(t *testing.T) {
 		}
 		if !strings.Contains(block, "buildWindowsPowerShellCommand(") {
 			t.Errorf("Windows %s command must use one PowerShell invocation", name)
+		}
+		if name == "upgrade" {
+			download := strings.Index(block, "try { ${buildWindowsDownloadStatement")
+			run := strings.Index(block, "; ${runUpgrade} } finally")
+			if download < 0 || run < 0 || download > run {
+				t.Error("Windows upgrade must stop after a failed download and clean up its temporary executable")
+			}
 		}
 	}
 }

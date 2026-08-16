@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## v0.23.4 - 2026-08-16
+
+### Fixed
+- Enable TLS 1.2 explicitly in generated Windows Agent install and upgrade commands, and stop immediately when the download fails instead of attempting to run a missing executable.
+
+## v0.23.3 - 2026-08-14
 
 ### Changed
 - Retain raw node, filesystem, network, and GPU metric partitions for 7 days instead of 90 days; hourly rollups remain available for 24 months.
