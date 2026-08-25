@@ -136,6 +136,7 @@ type BlockDeviceHardware struct {
 	SCSIECCCorrectedDelta    *int64     `json:"scsi_ecc_corrected_delta,omitempty"`
 	SCSINonMediumErrors      *int64     `json:"scsi_non_medium_errors,omitempty"`
 	SCSINonMediumErrorsDelta *int64     `json:"scsi_non_medium_errors_delta,omitempty"`
+	HostWritesBytes          *int64     `json:"host_writes_bytes,omitempty"`
 	PercentageUsed           *float64   `json:"percentage_used,omitempty"`
 }
 
@@ -684,7 +685,7 @@ func (store *Store) listBlockDevices(ctx context.Context, nodeID string) ([]Bloc
 			&item.ReadErrorRateRaw, &item.ReallocatedSectors, &item.PendingSectors,
 			&item.UncorrectableSectors, &item.SCSIGrownDefects, &item.SCSIECCCorrected,
 			&item.SCSIECCCorrectedDelta, &item.SCSINonMediumErrors,
-			&item.SCSINonMediumErrorsDelta, &item.PercentageUsed,
+			&item.SCSINonMediumErrorsDelta, &item.HostWritesBytes, &item.PercentageUsed,
 		); err != nil {
 			return nil, fmt.Errorf("scan block device: %w", err)
 		}
@@ -705,7 +706,7 @@ const blockDeviceDetailSQL = `
 		       health.uncorrectable_sectors, health.scsi_grown_defects,
 		       health.scsi_ecc_corrected, health.scsi_ecc_corrected_delta,
 		       health.scsi_non_medium_errors, health.scsi_non_medium_errors_delta,
-		       health.percentage_used
+		       health.host_writes_bytes, health.percentage_used
 		  FROM monitoring.block_devices device
 		  LEFT JOIN monitoring.storage_health_current_metrics health
 		    ON health.node_id = device.node_id AND health.block_device_id = device.id

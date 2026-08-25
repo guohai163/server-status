@@ -164,6 +164,7 @@ func TestNodeDetailQueriesIncludeHardwareHealth(t *testing.T) {
 		"health.scsi_grown_defects",
 		"health.scsi_ecc_corrected_delta",
 		"health.scsi_non_medium_errors_delta",
+		"health.host_writes_bytes",
 		"device.raid_passthrough",
 	} {
 		if !strings.Contains(blockDeviceDetailSQL, fragment) {

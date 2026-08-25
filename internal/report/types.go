@@ -226,6 +226,7 @@ type StorageHealth struct {
 	SCSIGrownDefects        *uint64  `json:"scsi_grown_defects,omitempty"`
 	SCSIECCCorrected        *uint64  `json:"scsi_ecc_corrected,omitempty"`
 	SCSINonMediumErrors     *uint64  `json:"scsi_non_medium_errors,omitempty"`
+	HostWritesBytes         *uint64  `json:"host_writes_bytes,omitempty"`
 	PercentageUsed          *float64 `json:"percentage_used,omitempty"`
 }
 

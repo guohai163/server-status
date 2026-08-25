@@ -43,6 +43,7 @@ type smartctlDocument struct {
 	SCSIModelName string      `json:"scsi_model_name"`
 	LogicalUnitID string      `json:"logical_unit_id"`
 	RotationRate  *uint64     `json:"rotation_rate"`
+	LogicalBlockSize json.Number `json:"logical_block_size"`
 	UserCapacity  struct {
 		Bytes json.Number `json:"bytes"`
 	} `json:"user_capacity"`
@@ -75,6 +76,9 @@ type smartctlDocument struct {
 		MediaErrors     json.Number `json:"media_errors"`
 		ErrorLogEntries json.Number `json:"num_err_log_entries"`
 		PowerOnHours    json.Number `json:"power_on_hours"`
+		DataUnitsWritten struct {
+			Value json.Number `json:"value"`
+		} `json:"data_units_written"`
 	} `json:"nvme_smart_health_information_log"`
 	SCSIErrorLog struct {
 		Read   smartSCSIErrorCounter `json:"read"`
@@ -323,6 +327,10 @@ func storageHealthFromSMART(blockDeviceKey string, document smartctlDocument) re
 		metric.ErrorCount = value
 	}
 	metric.PercentageUsed = document.NVMeHealth.PercentageUsed
+	metric.HostWritesBytes = ataHostWritesBytes(document)
+	if value := smartScaledUint(document.NVMeHealth.DataUnitsWritten.Value, nvmeDataUnitBytes); value != nil {
+		metric.HostWritesBytes = value
+	}
 
 	if scsiErrors := sumSMARTCounters(
 		document.SCSIErrorLog.Read.TotalUncorrected,
@@ -395,6 +403,26 @@ func storageHealthFromSMART(blockDeviceKey string, document smartctlDocument) re
 	return metric
 }
 
+const (
+	nvmeDataUnitBytes     uint64 = 512000
+	ataHostWriteUnitBytes uint64 = 32 << 20
+)
+
+func ataHostWritesBytes(document smartctlDocument) *uint64 {
+	logicalBlockSize := smartUint(document.LogicalBlockSize)
+	for _, attribute := range document.ATAAttributes.Table {
+		switch strings.ToLower(strings.TrimSpace(attribute.Name)) {
+		case "total_lbas_written":
+			if logicalBlockSize != nil {
+				return smartScaledUint(attribute.Raw.Value, *logicalBlockSize)
+			}
+		case "host_writes_32mib":
+			return smartScaledUint(attribute.Raw.Value, ataHostWriteUnitBytes)
+		}
+	}
+	return nil
+}
+
 func smartUint(value json.Number) *uint64 {
 	text := strings.TrimSpace(string(value))
 	if text == "" {
@@ -405,6 +433,17 @@ func smartUint(value json.Number) *uint64 {
 		return nil
 	}
 	return &parsed
+}
+
+func smartScaledUint(value json.Number, multiplier uint64) *uint64 {
+	if multiplier == 0 {
+		return nil
+	}
+	parsed := smartUint(value)
+	if parsed == nil || *parsed > math.MaxInt64/multiplier {
+		return nil
+	}
+	return uint64Pointer(*parsed * multiplier)
 }
 
 func sumSMARTCounters(counters ...json.Number) *uint64 {

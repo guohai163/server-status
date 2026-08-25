@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -61,14 +62,16 @@ func TestSMARTATAHealthRiskAndCounters(t *testing.T) {
   "model_name":"Example SSD","serial_number":"ATA-1",
   "smart_support":{"available":true,"enabled":true},
   "smart_status":{"passed":true},
-  "temperature":{"current":41},
-  "power_on_time":{"hours":12345},
-  "ata_smart_error_log":{"summary":{"count":2}},
-  "ata_smart_attributes":{"table":[
-    {"id":1,"name":"Raw_Read_Error_Rate","value":100,"raw":{"value":7}},
-    {"id":5,"name":"Reallocated_Sector_Ct","value":99,"raw":{"value":3}},
-    {"id":197,"name":"Current_Pending_Sector","value":100,"raw":{"value":0}},
-    {"id":198,"name":"Offline_Uncorrectable","value":100,"raw":{"value":0}}
+	  "temperature":{"current":41},
+	  "power_on_time":{"hours":12345},
+	  "logical_block_size":512,
+	  "ata_smart_error_log":{"summary":{"count":2}},
+	  "ata_smart_attributes":{"table":[
+	    {"id":1,"name":"Raw_Read_Error_Rate","value":100,"raw":{"value":7}},
+	    {"id":5,"name":"Reallocated_Sector_Ct","value":99,"raw":{"value":3}},
+	    {"id":197,"name":"Current_Pending_Sector","value":100,"raw":{"value":0}},
+	    {"id":198,"name":"Offline_Uncorrectable","value":100,"raw":{"value":0}},
+	    {"id":241,"name":"Total_LBAs_Written","value":100,"raw":{"value":123456789}}
   ]}
 }`))
 	if err != nil {
@@ -84,6 +87,9 @@ func TestSMARTATAHealthRiskAndCounters(t *testing.T) {
 	if metric.ReallocatedSectors == nil || *metric.ReallocatedSectors != 3 || metric.ErrorCount == nil || *metric.ErrorCount != 2 {
 		t.Fatalf("unexpected ATA counters: %+v", metric)
 	}
+	if metric.HostWritesBytes == nil || *metric.HostWritesBytes != 123456789*512 {
+		t.Fatalf("unexpected ATA host writes: %+v", metric)
+	}
 }
 
 func TestSMARTNVMeCriticalHealth(t *testing.T) {
@@ -95,7 +101,8 @@ func TestSMARTNVMeCriticalHealth(t *testing.T) {
   "smart_status":{"passed":false},
   "nvme_smart_health_information_log":{
     "critical_warning":1,"temperature":57,"percentage_used":101,
-    "media_errors":4,"num_err_log_entries":8,"power_on_hours":2200
+	    "media_errors":4,"num_err_log_entries":8,"power_on_hours":2200,
+	    "data_units_written":{"value":12345678,"string":"6.32 TB"}
   }
 }`))
 	if err != nil {
@@ -107,6 +114,44 @@ func TestSMARTNVMeCriticalHealth(t *testing.T) {
 	}
 	if metric.ErrorCount == nil || *metric.ErrorCount != 4 || metric.PercentageUsed == nil || *metric.PercentageUsed != 101 {
 		t.Fatalf("unexpected NVMe counters: %+v", metric)
+	}
+	if metric.HostWritesBytes == nil || *metric.HostWritesBytes != 12345678*512000 {
+		t.Fatalf("unexpected NVMe host writes: %+v", metric)
+	}
+}
+
+func TestATAHostWritesRequiresKnownUnits(t *testing.T) {
+	document, err := parseSMARTDocument([]byte(`{
+  "device":{"name":"/dev/sda","type":"sat","protocol":"ATA"},
+  "model_name":"Example SSD","serial_number":"ATA-1",
+  "ata_smart_attributes":{"table":[
+    {"id":241,"name":"Total_LBAs_Written","value":100,"raw":{"value":123456789}}
+  ]}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metric := storageHealthFromSMART("ATA-1", document); metric.HostWritesBytes != nil {
+		t.Fatalf("host writes with unknown units must be omitted: %+v", metric)
+	}
+}
+
+func TestSMARTHostWritesRejectsOverflow(t *testing.T) {
+	document, err := parseSMARTDocument([]byte(`{
+  "device":{"name":"/dev/nvme0","type":"nvme","protocol":"NVMe"},
+  "model_name":"Example NVMe","serial_number":"NVME-1",
+  "nvme_smart_health_information_log":{
+    "data_units_written":{"value":18014398509481984}
+  }
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.MaxInt64/nvmeDataUnitBytes >= 18014398509481984 {
+		t.Fatal("test fixture no longer overflows the supported storage range")
+	}
+	if metric := storageHealthFromSMART("NVME-1", document); metric.HostWritesBytes != nil {
+		t.Fatalf("overflowing host writes must be omitted: %+v", metric)
 	}
 }
 

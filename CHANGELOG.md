@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.24.0 - 2026-08-25
+
+### Added
+- Collect SMART cumulative host writes from Linux NVMe SSDs and SATA SSDs that report standard write units, then display the value as TBW in storage health details.
+
 ## v0.23.4 - 2026-08-16
 
 ### Fixed

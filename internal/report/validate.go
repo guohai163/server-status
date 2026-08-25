@@ -318,7 +318,7 @@ func validateMetrics(inventory Inventory, metrics Metrics) error {
 		if err := validateOptionalUnsignedBigints(
 			item.PowerOnHours, item.ErrorCount, item.ReadErrorRateNormalized, item.ReadErrorRateRaw,
 			item.ReallocatedSectors, item.PendingSectors, item.UncorrectableSectors,
-			item.SCSIGrownDefects, item.SCSIECCCorrected, item.SCSINonMediumErrors,
+			item.SCSIGrownDefects, item.SCSIECCCorrected, item.SCSINonMediumErrors, item.HostWritesBytes,
 		); err != nil {
 			return fmt.Errorf("storage health metric %q: %w", item.BlockDeviceKey, err)
 		}

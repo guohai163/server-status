@@ -403,11 +403,11 @@ func replaceStorageHealthMetrics(ctx context.Context, tx pgx.Tx, nodeID string, 
 				read_error_rate_normalized, read_error_rate_raw,
 				reallocated_sectors, pending_sectors, uncorrectable_sectors,
 				scsi_grown_defects, scsi_ecc_corrected, scsi_ecc_corrected_delta,
-				scsi_non_medium_errors, scsi_non_medium_errors_delta, percentage_used
+				scsi_non_medium_errors, scsi_non_medium_errors_delta, host_writes_bytes, percentage_used
 			) VALUES (
 				$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
 				$11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-				$21, $22, $23, $24
+				$21, $22, $23, $24, $25
 			)
 		`, nodeID, blockDeviceID, bucketAt, collectedAt, receivedAt,
 			metric.SMARTAvailable, metric.SMARTEnabled, metric.SMARTStatus, metric.RiskLevel,
@@ -418,7 +418,7 @@ func replaceStorageHealthMetrics(ctx context.Context, tx pgx.Tx, nodeID string, 
 			nullableI64(metric.UncorrectableSectors), nullableI64(metric.SCSIGrownDefects),
 			nullableI64(metric.SCSIECCCorrected), nullableI64(eccDelta),
 			nullableI64(metric.SCSINonMediumErrors), nullableI64(nonMediumDelta),
-			metric.PercentageUsed); err != nil {
+			nullableI64(metric.HostWritesBytes), metric.PercentageUsed); err != nil {
 			return fmt.Errorf("insert storage health metric %q: %w", metric.BlockDeviceKey, err)
 		}
 	}

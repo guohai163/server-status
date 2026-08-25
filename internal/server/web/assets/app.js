@@ -804,6 +804,11 @@
       const counterWithDelta = (label, total, delta) => hasValue(total)
         ? `${label} ${total}${hasValue(delta) ? ` / 本周期 +${delta}` : ""}`
         : "";
+      const formatTBW = (bytes) => {
+        const value = Number(bytes);
+        if (!Number.isFinite(value) || value < 0) return "--";
+        return `${(value / 1e12).toLocaleString("zh-CN", { maximumFractionDigits: 2 })} TB`;
+      };
       const counters = [
         hasValue(item.error_count) ? `${errorLabel} ${item.error_count}` : "",
         hasValue(item.reallocated_sectors) ? `重映射 ${item.reallocated_sectors}` : "",
@@ -812,6 +817,7 @@
         hasValue(item.scsi_grown_defects) ? `SAS grown defect ${item.scsi_grown_defects}` : "",
         counterWithDelta("SAS ECC 纠错", item.scsi_ecc_corrected, item.scsi_ecc_corrected_delta),
         counterWithDelta("SAS 非介质错误", item.scsi_non_medium_errors, item.scsi_non_medium_errors_delta),
+        hasValue(item.host_writes_bytes) ? `累计写入（TBW） ${formatTBW(item.host_writes_bytes)}` : "",
         hasValue(item.percentage_used) ? `寿命已用 ${Number(item.percentage_used).toFixed(0)}%` : "",
         hasValue(item.read_error_rate_normalized) ? `读错误率 标准化 ${item.read_error_rate_normalized}${hasValue(item.read_error_rate_raw) ? ` / 原始 ${item.read_error_rate_raw}` : ""}` : ""
       ].filter(Boolean);

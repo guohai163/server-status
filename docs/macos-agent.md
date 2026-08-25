@@ -35,7 +35,7 @@ make build-macos-agent-release VERSION=0.13.0
 
 ## 安装
 
-部署本版本 Agent 前，中心数据库必须已按顺序执行到 `V016__raw_metric_retention.sql`，并升级中心服务；其中 V008 负责持久化 Apple Silicon 的 P/E 核心拓扑。macOS Agent 当前不采集 V009/V010 新增的 hwmon/SMART 指标、V011 新增的 RAID 控制器状态、V014 新增的通用传感器指标或 V015 新增的 KVM 清单。
+部署本版本 Agent 前，中心数据库必须已按顺序执行到 `V017__storage_host_writes.sql`，并升级中心服务；其中 V008 负责持久化 Apple Silicon 的 P/E 核心拓扑。macOS Agent 当前不采集 V009/V010/V017 新增的 hwmon/SMART 指标、V011 新增的 RAID 控制器状态、V014 新增的通用传感器指标或 V015 新增的 KVM 清单。
 
 1. 在中心看板点击“添加节点”。
 2. 目标平台选择“macOS 11 及以上”。

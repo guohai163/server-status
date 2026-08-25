@@ -711,8 +711,17 @@ DECLARE
     v_count integer;
     v_severity text;
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM monitoring.schema_migrations WHERE version = 'V016') THEN
-        RAISE EXCEPTION 'V016 migration history entry is missing';
+    IF NOT EXISTS (SELECT 1 FROM monitoring.schema_migrations WHERE version = 'V017') THEN
+        RAISE EXCEPTION 'V017 migration history entry is missing';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+          FROM information_schema.columns
+         WHERE table_schema = 'monitoring'
+           AND table_name = 'storage_health_current_metrics'
+           AND column_name = 'host_writes_bytes'
+    ) THEN
+        RAISE EXCEPTION 'storage host writes column is missing';
     END IF;
     IF NOT EXISTS (
         SELECT 1

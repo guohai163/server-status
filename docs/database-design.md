@@ -71,7 +71,7 @@ erDiagram
 | `temperature_current_metrics` | CPU、主板、GPU、存储及其他 hwmon 传感器的最新温度和阈值 |
 | `hardware_sensor_current_snapshots` | 实体机最新通用传感器快照的采集时间和乱序保护边界，包括空快照 |
 | `hardware_sensor_current_metrics` | 实体机最新风扇转速、电压、电流、功率、阈值与告警/故障状态 |
-| `storage_health_current_metrics` | 直连盘或 RAID 成员盘的最新 SMART 状态、通电时长、错误计数、磨损与风险 |
+| `storage_health_current_metrics` | 直连盘或 RAID 成员盘的最新 SMART 状态、通电时长、错误计数、累计主机写入量（TBW）、磨损与风险 |
 | `raid_status_current_snapshots` | 每个节点最新 RAID 状态快照的采集时间和乱序保护边界 |
 | `raid_controller_current_metrics` | RAID 控制器型号、状态以及磁盘组、虚拟盘和物理盘数量 |
 | `raid_virtual_drive_current_metrics` | 虚拟盘 RAID 级别、状态、访问、一致性、缓存和容量 |
@@ -157,7 +157,7 @@ SELECT monitoring.rollup_hour($1::timestamptz);
 
 ## 部署与验证
 
-迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好，`V005` 增加 NVIDIA GPU 清单和当前指标，`V006` 增加每节点最多 5 个管理员 Tag，`V007` 增加逐 GPU 分钟历史、小时汇总与 current 同步触发器，`V008` 增加 ARM 性能核与能效核拓扑，`V009` 增加温度与 SMART 当前快照，`V010` 增加 SAS 缺陷、ECC 与 non-medium 计数及增量，`V011` 增加 RAID 控制器、虚拟盘、物理盘和重建状态，`V012` 增加持久化告警事件与清理函数，`V013` 修正资源历史外键，使节点及其全部关联记录可完整级联删除，`V014` 增加实体机 hwmon 通用传感器当前快照，`V015` 增加 libvirt KVM 虚拟机清单与变更历史，`V016` 将所有原始指标保留期收紧为 7 天。在连接信息由环境或 `.pgpass` 提供的前提下执行：
+迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好，`V005` 增加 NVIDIA GPU 清单和当前指标，`V006` 增加每节点最多 5 个管理员 Tag，`V007` 增加逐 GPU 分钟历史、小时汇总与 current 同步触发器，`V008` 增加 ARM 性能核与能效核拓扑，`V009` 增加温度与 SMART 当前快照，`V010` 增加 SAS 缺陷、ECC 与 non-medium 计数及增量，`V011` 增加 RAID 控制器、虚拟盘、物理盘和重建状态，`V012` 增加持久化告警事件与清理函数，`V013` 修正资源历史外键，使节点及其全部关联记录可完整级联删除，`V014` 增加实体机 hwmon 通用传感器当前快照，`V015` 增加 libvirt KVM 虚拟机清单与变更历史，`V016` 将所有原始指标保留期收紧为 7 天，`V017` 增加 SMART 累计主机写入量以展示 SSD TBW。在连接信息由环境或 `.pgpass` 提供的前提下执行：
 
 ```bash
 psql -v ON_ERROR_STOP=1 -f db/migrations/V001__monitoring_schema.sql
@@ -176,6 +176,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V013__cascade_node_deletion.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V014__hardware_sensor_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V015__kvm_virtual_machines.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V016__raw_metric_retention.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V017__storage_host_writes.sql
 psql -v ON_ERROR_STOP=1 -f db/verify/V001__verify.sql
 ```
 

@@ -171,6 +171,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V013__cascade_node_deletion.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V014__hardware_sensor_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V015__kvm_virtual_machines.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V016__raw_metric_retention.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V017__storage_host_writes.sql
 ```
 
 中央服务应使用继承 `server_status_writer` 的独立登录角色，不要使用 PostgreSQL 超级用户。

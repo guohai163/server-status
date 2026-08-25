@@ -687,7 +687,7 @@ func TestWebUIPrioritizesReportedSMARTStatus(t *testing.T) {
 	}
 	for _, fragment := range []string{
 		`scsi_grown_defects`, `scsi_ecc_corrected_delta`, `scsi_non_medium_errors_delta`,
-		`本周期 SAS ECC 纠错增加`, `本周期 SAS 非介质错误增加`,
+		`本周期 SAS ECC 纠错增加`, `本周期 SAS 非介质错误增加`, `host_writes_bytes`, `累计写入（TBW）`,
 	} {
 		if !strings.Contains(script, fragment) {
 			t.Errorf("SAS health UI does not contain %q", fragment)

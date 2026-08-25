@@ -183,6 +183,7 @@ func TestReportValidationAcceptsHardwareHealthMetrics(t *testing.T) {
 	temperature := 42.5
 	powerOnHours := uint64(1234)
 	errorCount := uint64(2)
+	hostWritesBytes := uint64(2_000_000_000_000)
 	scsiGrownDefects := uint64(1)
 	scsiECCCorrected := uint64(14)
 	scsiNonMediumErrors := uint64(41)
@@ -198,6 +199,7 @@ func TestReportValidationAcceptsHardwareHealthMetrics(t *testing.T) {
 		BlockDeviceKey: "disk-1", SMARTAvailable: true, SMARTEnabled: true,
 		SMARTStatus: "passed", RiskLevel: "warning", RiskReasons: []string{"device_errors", "scsi_grown_defects"},
 		TemperatureCelsius: &temperature, PowerOnHours: &powerOnHours, ErrorCount: &errorCount,
+		HostWritesBytes: &hostWritesBytes,
 		SCSIGrownDefects: &scsiGrownDefects, SCSIECCCorrected: &scsiECCCorrected,
 		SCSINonMediumErrors: &scsiNonMediumErrors,
 	}}
@@ -209,6 +211,12 @@ func TestReportValidationAcceptsHardwareHealthMetrics(t *testing.T) {
 	payload.Metrics.StorageHealth[0].BlockDeviceKey = "missing"
 	if err := payload.Validate(now); err == nil {
 		t.Fatal("storage health metric referencing an unknown disk was accepted")
+	}
+	payload.Metrics.StorageHealth[0].BlockDeviceKey = "disk-1"
+	invalidHostWrites := ^uint64(0)
+	payload.Metrics.StorageHealth[0].HostWritesBytes = &invalidHostWrites
+	if err := payload.Validate(now); err == nil {
+		t.Fatal("storage host writes outside PostgreSQL bigint were accepted")
 	}
 }
 
