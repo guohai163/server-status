@@ -42,7 +42,7 @@ erDiagram
     NODES ||--o{ ALERT_EVENTS : raises
 ```
 
-硬盘型号、序列号和数量来自 `block_devices`；容量使用率来自 `filesystems`。二者刻意分开，以支持 LVM、RAID、一个文件系统跨设备以及同一设备多挂载等情况。
+硬盘型号和序列号来自 `block_devices` 与 RAID 拓扑；摘要数量优先使用 RAID 控制器物理盘，其次使用 SMART RAID 透传盘，最后回退到直连块设备。容量使用率来自可写、真实的 `filesystems`，避免把 RAID 前后的硬件容量或 `/snap` loop 只读挂载计入用户可用空间。
 
 ## 表分组
 
@@ -117,7 +117,7 @@ NVIDIA GPU 由 Agent 调用 `nvidia-smi` 识别，以 GPU UUID 作为稳定清�
 ## 查询入口
 
 - `v_node_status`：节点在线状态、最后在线时间、CPU、load、内存、swap 和 uptime。三分钟没有上报即离线，禁用节点优先显示 `disabled`。
-- `v_node_hardware_summary`：CPU 封装/核心/线程及型号、内存条数量/容量及型号、物理硬盘数量/容量及型号。
+- `v_node_hardware_summary`：CPU 封装/核心/线程及型号、内存条数量/容量及型号、RAID 感知的物理硬盘数量/容量及型号。
 - `v_filesystem_status`：所有有效挂载点的最新容量和 inode 使用情况。
 - `v_network_status`：所有有效网卡、IPv4/IPv6 地址、链路状态、当前流量和错误计数。
 - GPU 详情查询：有效 GPU 清单关联 `gpu_current_metrics`，按设备索引逐卡返回；历史查询按设备关联分钟或小时表，逐卡返回核心和显存使用率序列，并与节点历史使用相同时间桶。
@@ -157,7 +157,7 @@ SELECT monitoring.rollup_hour($1::timestamptz);
 
 ## 部署与验证
 
-迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好，`V005` 增加 NVIDIA GPU 清单和当前指标，`V006` 增加每节点最多 5 个管理员 Tag，`V007` 增加逐 GPU 分钟历史、小时汇总与 current 同步触发器，`V008` 增加 ARM 性能核与能效核拓扑，`V009` 增加温度与 SMART 当前快照，`V010` 增加 SAS 缺陷、ECC 与 non-medium 计数及增量，`V011` 增加 RAID 控制器、虚拟盘、物理盘和重建状态，`V012` 增加持久化告警事件与清理函数，`V013` 修正资源历史外键，使节点及其全部关联记录可完整级联删除，`V014` 增加实体机 hwmon 通用传感器当前快照，`V015` 增加 libvirt KVM 虚拟机清单与变更历史，`V016` 将所有原始指标保留期收紧为 7 天，`V017` 增加 SMART 累计主机写入量以展示 SSD TBW。在连接信息由环境或 `.pgpass` 提供的前提下执行：
+迁移文件位于 `db/migrations`，必须按版本号顺序执行。`V002` 修正分区清理流程，`V003` 增加磁盘 I/O 原始指标、current 速率和小时汇总，`V004` 增加首页 IP 来源网卡偏好，`V005` 增加 NVIDIA GPU 清单和当前指标，`V006` 增加每节点最多 5 个管理员 Tag，`V007` 增加逐 GPU 分钟历史、小时汇总与 current 同步触发器，`V008` 增加 ARM 性能核与能效核拓扑，`V009` 增加温度与 SMART 当前快照，`V010` 增加 SAS 缺陷、ECC 与 non-medium 计数及增量，`V011` 增加 RAID 控制器、虚拟盘、物理盘和重建状态，`V012` 增加持久化告警事件与清理函数，`V013` 修正资源历史外键，使节点及其全部关联记录可完整级联删除，`V014` 增加实体机 hwmon 通用传感器当前快照，`V015` 增加 libvirt KVM 虚拟机清单与变更历史，`V016` 将所有原始指标保留期收紧为 7 天，`V017` 增加 SMART 累计主机写入量以展示 SSD TBW，`V018` 修正 RAID 场景下摘要物理盘数量口径。在连接信息由环境或 `.pgpass` 提供的前提下执行：
 
 ```bash
 psql -v ON_ERROR_STOP=1 -f db/migrations/V001__monitoring_schema.sql
@@ -177,6 +177,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V014__hardware_sensor_metrics.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V015__kvm_virtual_machines.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V016__raw_metric_retention.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V017__storage_host_writes.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V018__raid_aware_storage_summary.sql
 psql -v ON_ERROR_STOP=1 -f db/verify/V001__verify.sql
 ```
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.24.1 - 2026-08-28
+
+### Fixed
+- Show RAID-aware physical disk counts and mounted writable filesystem capacity in node summaries so RAID arrays and `/snap` loop mounts no longer inflate dashboard storage totals.
+
 ## v0.24.0 - 2026-08-25
 
 ### Added

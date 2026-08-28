@@ -711,8 +711,8 @@ DECLARE
     v_count integer;
     v_severity text;
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM monitoring.schema_migrations WHERE version = 'V017') THEN
-        RAISE EXCEPTION 'V017 migration history entry is missing';
+    IF NOT EXISTS (SELECT 1 FROM monitoring.schema_migrations WHERE version = 'V018') THEN
+        RAISE EXCEPTION 'V018 migration history entry is missing';
     END IF;
     IF NOT EXISTS (
         SELECT 1

@@ -70,7 +70,7 @@ func (export nodeExportWorkbook) writeSummary(nodes []store.NodeDetail) error {
 	const sheet = "机器概览"
 	headers := []string{
 		"节点 ID", "Agent ID", "显示名称", "主机名", "IP 地址", "状态", "机器类型", "服务器型号", "操作系统", "架构", "Tag", "自定义 Labels", "最近上报", "Agent 版本",
-		"CPU 型号", "CPU 封装数", "CPU 物理核心", "CPU 逻辑线程", "内存总量 (Bytes)", "内存条数", "磁盘总量 (Bytes)", "磁盘数量", "GPU 数量",
+		"CPU 型号", "CPU 封装数", "CPU 物理核心", "CPU 逻辑线程", "内存总量 (Bytes)", "内存条数", "挂载文件系统总量 (Bytes)", "物理硬盘数量", "GPU 数量",
 		"CPU 使用率 (%)", "内存使用率 (%)", "磁盘使用率 (%)", "Load 1", "Load 5", "Load 15", "运行时间 (秒)", "网络接收 (Bytes/s)", "网络发送 (Bytes/s)",
 	}
 	rows := make([][]any, 0, len(nodes))

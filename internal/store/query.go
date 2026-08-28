@@ -393,6 +393,17 @@ const nodeListOrderSQL = `
 
 const writableFilesystemPredicateSQL = `NOT (filesystem.mount_options && ARRAY['ro', 'read-only']::text[])`
 
+const summarizedFilesystemPredicateSQL = writableFilesystemPredicateSQL + `
+		   AND lower(filesystem.filesystem_type) NOT IN (
+		       'autofs', 'binfmt_misc', 'bpf', 'cgroup', 'cgroup2', 'configfs',
+		       'debugfs', 'devpts', 'devtmpfs', 'efivarfs', 'fusectl',
+		       'hugetlbfs', 'mqueue', 'proc', 'pstore', 'ramfs', 'rpc_pipefs',
+		       'securityfs', 'squashfs', 'sysfs', 'tmpfs', 'tracefs'
+		   )
+		   AND filesystem.device_name !~ '^/dev/loop[0-9]+$'
+		   AND filesystem.mount_point <> '/snap'
+		   AND filesystem.mount_point NOT LIKE '/snap/%'`
+
 const nodeSummarySQL = `
 	SELECT
 		status.node_id::text,
@@ -434,9 +445,14 @@ const nodeSummarySQL = `
 		hardware.memory_total_bytes,
 		COALESCE(hardware.memory_models, ARRAY[]::text[]),
 		hardware.disk_count,
-		hardware.disk_total_bytes,
+		COALESCE(NULLIF(filesystem_summary.total_bytes, 0), hardware.disk_total_bytes),
 		COALESCE(hardware.disk_models, ARRAY[]::text[]),
-		COALESCE(filesystem_usage.used_percent, 0)::double precision,
+		COALESCE(
+		    CASE WHEN filesystem_summary.total_bytes > 0
+		         THEN filesystem_summary.used_bytes::numeric * 100 / filesystem_summary.total_bytes
+		    END,
+		    0
+		)::double precision,
 		COALESCE(current_metric.disk_read_bytes_per_second, 0)::double precision,
 		COALESCE(current_metric.disk_write_bytes_per_second, 0)::double precision,
 		COALESCE(network_usage.rx_bytes_per_second, 0)::double precision,
@@ -469,15 +485,29 @@ const nodeSummarySQL = `
 		 LIMIT 1
 	  ) primary_address ON true
 	  LEFT JOIN LATERAL (
-		SELECT max(filesystem_metric.used_percent) AS used_percent
-		  FROM monitoring.filesystem_current_metrics filesystem_metric
-		  JOIN monitoring.filesystems filesystem
-		    ON filesystem.node_id = filesystem_metric.node_id
-		   AND filesystem.id = filesystem_metric.filesystem_id
-		 WHERE filesystem_metric.node_id = status.node_id
-		   AND filesystem.removed_at IS NULL
-		   AND ` + writableFilesystemPredicateSQL + `
-	  ) filesystem_usage ON true
+		SELECT sum(selected_filesystem.total_bytes)::bigint AS total_bytes,
+		       sum(selected_filesystem.used_bytes)::bigint AS used_bytes
+		  FROM (
+			SELECT DISTINCT ON (
+			       COALESCE(NULLIF(filesystem.filesystem_uuid, ''), filesystem.device_name)
+			       )
+			       filesystem_metric.total_bytes,
+			       filesystem_metric.used_bytes,
+			       filesystem.mount_point
+			  FROM monitoring.filesystem_current_metrics filesystem_metric
+			  JOIN monitoring.filesystems filesystem
+			    ON filesystem.node_id = filesystem_metric.node_id
+			   AND filesystem.id = filesystem_metric.filesystem_id
+			 WHERE filesystem_metric.node_id = status.node_id
+			   AND filesystem.removed_at IS NULL
+			   AND filesystem_metric.total_bytes > 0
+			   AND ` + summarizedFilesystemPredicateSQL + `
+			 ORDER BY COALESCE(NULLIF(filesystem.filesystem_uuid, ''), filesystem.device_name),
+			          CASE WHEN filesystem.mount_point = '/' THEN 0 ELSE 1 END,
+			          length(filesystem.mount_point),
+			          filesystem.mount_point
+		  ) selected_filesystem
+	  ) filesystem_summary ON true
 	  LEFT JOIN LATERAL (
 		SELECT sum(rx_bits_per_second) / 8 AS rx_bytes_per_second,
 		       sum(tx_bits_per_second) / 8 AS tx_bytes_per_second

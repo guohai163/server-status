@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,44 @@ func TestDiskUsageQueriesExcludeReadOnlyFilesystems(t *testing.T) {
 	}
 	if !strings.Contains(nodeSummarySQL, "filesystem.removed_at IS NULL") {
 		t.Error("current disk usage query does not exclude removed filesystems")
+	}
+}
+
+func TestRAIDAwareStorageSummaryMigration(t *testing.T) {
+	data, err := os.ReadFile("../../db/migrations/V018__raid_aware_storage_summary.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	migration := string(data)
+	for _, fragment := range []string{
+		"CREATE OR REPLACE VIEW v_node_hardware_summary",
+		"monitoring.raid_physical_drive_current_metrics",
+		"AND raid_passthrough",
+		"AND NOT raid_passthrough",
+		"WHEN COALESCE(raid_physical.disk_count, 0) > 0 THEN raid_physical.disk_count",
+		"WHEN COALESCE(raid_passthrough.disk_count, 0) > 0 THEN raid_passthrough.disk_count",
+	} {
+		if !strings.Contains(migration, fragment) {
+			t.Errorf("V018 migration does not contain %q", fragment)
+		}
+	}
+}
+
+func TestNodeSummaryQueryUsesWritableFilesystemCapacity(t *testing.T) {
+	for _, fragment := range []string{
+		"COALESCE(NULLIF(filesystem_summary.total_bytes, 0), hardware.disk_total_bytes)",
+		"sum(selected_filesystem.total_bytes)::bigint AS total_bytes",
+		"sum(selected_filesystem.used_bytes)::bigint AS used_bytes",
+		"filesystem_metric.total_bytes > 0",
+		"lower(filesystem.filesystem_type) NOT IN",
+		"'squashfs'",
+		"filesystem.device_name !~ '^/dev/loop[0-9]+$'",
+		"filesystem.mount_point NOT LIKE '/snap/%'",
+		"filesystem_summary.used_bytes::numeric * 100 / filesystem_summary.total_bytes",
+	} {
+		if !strings.Contains(nodeSummarySQL, fragment) {
+			t.Errorf("node summary query does not contain %q", fragment)
+		}
 	}
 }
 

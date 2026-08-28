@@ -244,7 +244,7 @@
       <div class="metric-list">
         ${progress(cpuLabel(node), node.cpu_usage_percent)}
         ${progress(`内存 · ${formatBytes(node.memory_total_bytes)}`, memoryPercent)}
-        ${progress(`磁盘 · ${formatBytes(node.disk_total_bytes)}`, node.disk_usage_percent)}
+        ${progress(`磁盘 · ${formatBytes(node.disk_total_bytes)} 挂载容量`, node.disk_usage_percent)}
       </div>
       <div class="io-strip">
         <div class="io-item"><span>磁盘读取</span><strong>↓ ${formatRate(node.disk_read_bytes_per_second)}</strong></div>
@@ -413,7 +413,7 @@
     <div class="metric-strip">
       ${metricTile("CPU", formatPercent(node.cpu_usage_percent), `${node.cpu_physical_core_count} 核 / ${node.cpu_logical_thread_count} 线程`)}
       ${metricTile("内存", formatPercent(node.memory_usage_percent), `${formatBytes(node.memory_used_bytes)} / ${formatBytes(node.memory_total_bytes)}`)}
-      ${metricTile("磁盘", formatPercent(node.disk_usage_percent), `${node.disk_count} 块 / ${formatBytes(node.disk_total_bytes)}`)}
+      ${metricTile("磁盘", formatPercent(node.disk_usage_percent), `${node.disk_count} 块硬盘 / ${formatBytes(node.disk_total_bytes)} 挂载容量`)}
       ${metricTile("磁盘 I/O", `↓ ${formatRate(node.disk_read_bytes_per_second)}`, `↑ ${formatRate(node.disk_write_bytes_per_second)}`)}
       ${metricTile("运行时间", formatDuration(node.uptime_seconds), `${escapeHTML(node.os_name)} ${escapeHTML(node.os_version)}`)}
     </div>
