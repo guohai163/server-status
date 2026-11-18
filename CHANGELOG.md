@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.26.1 - 2026-11-18
+
+### Fixed
+- Use the Linux distribution ID and version from `os-release` when legacy detection incorrectly identifies Ubuntu or another Debian derivative as Debian.
+
 ## v0.26.0 - 2026-11-18
 
 ### Added

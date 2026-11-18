@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/guohai/server-status/internal/report"
+	"github.com/shirou/gopsutil/v4/common"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/host"
@@ -47,6 +48,10 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 	hostInfo, err := host.InfoWithContext(ctx)
 	if err != nil {
 		return report.Report{}, fmt.Errorf("collect host info: %w", err)
+	}
+	osName, osVersion := hostInfo.Platform, hostInfo.PlatformVersion
+	if runtime.GOOS == "linux" {
+		osName, osVersion = linuxReportedPlatform(ctx, osName, osVersion)
 	}
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -144,8 +149,8 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 		Agent: report.AgentInfo{
 			ID:            config.AgentID,
 			Hostname:      hostname,
-			OSName:        hostInfo.Platform,
-			OSVersion:     hostInfo.PlatformVersion,
+			OSName:        osName,
+			OSVersion:     osVersion,
 			KernelVersion: hostInfo.KernelVersion,
 			Architecture:  runtime.GOARCH,
 			AgentVersion:  Version,
@@ -261,6 +266,47 @@ func parseNVIDIASMI(output string) ([]report.GPU, []report.GPUMetrics) {
 		metrics = append(metrics, sample.metric)
 	}
 	return inventory, metrics
+}
+
+func linuxReportedPlatform(ctx context.Context, platform, version string) (string, string) {
+	// gopsutil checks debian_version before os-release, so Debian derivatives can be reported as Debian.
+	if platform != "debian" {
+		return platform, version
+	}
+
+	hostEnv, _ := ctx.Value(common.EnvKey).(common.EnvMap)
+	etcDir := hostEnv[common.HostEtcEnvKey]
+	if etcDir == "" {
+		etcDir = os.Getenv(string(common.HostEtcEnvKey))
+	}
+	if etcDir == "" {
+		etcDir = "/etc"
+	}
+	contents, err := os.ReadFile(filepath.Join(etcDir, "os-release"))
+	if errors.Is(err, os.ErrNotExist) && filepath.Clean(etcDir) == "/etc" {
+		contents, err = os.ReadFile("/usr/lib/os-release")
+	}
+	if err != nil {
+		return platform, version
+	}
+
+	var releaseID, releaseVersion string
+	for line := range strings.SplitSeq(string(contents), "\n") {
+		key, value, found := strings.Cut(strings.TrimSpace(line), "=")
+		if !found {
+			continue
+		}
+		switch key {
+		case "ID":
+			releaseID = strings.Trim(value, `"'`)
+		case "VERSION_ID":
+			releaseVersion = strings.Trim(value, `"'`)
+		}
+	}
+	if releaseID == "" || releaseID == platform {
+		return platform, version
+	}
+	return releaseID, releaseVersion
 }
 
 func classifyMachineType(virtualizationRole string) string {

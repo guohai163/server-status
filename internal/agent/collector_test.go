@@ -1,10 +1,14 @@
 package agent
 
 import (
+	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/guohai/server-status/internal/report"
+	"github.com/shirou/gopsutil/v4/common"
 	"github.com/shirou/gopsutil/v4/disk"
 )
 
@@ -68,6 +72,49 @@ func TestPreferredBridgeIPv4(t *testing.T) {
 	}
 	if got := preferredBridgeIPv4(interfaces, func(string) bool { return false }); got != "" {
 		t.Fatalf("expected no preferred address without a bridge, got %q", got)
+	}
+}
+
+func TestLinuxReportedPlatform(t *testing.T) {
+	tests := []struct {
+		name, platform, version, osRelease, wantPlatform, wantVersion string
+	}{
+		{
+			name: "Ubuntu misidentified as Debian", platform: "debian", version: "forky/sid",
+			osRelease:    "PRETTY_NAME=\"Ubuntu 26.10\"\nVERSION_ID=\"26.10\"\nID=ubuntu\nID_LIKE=debian\n",
+			wantPlatform: "ubuntu", wantVersion: "26.10",
+		},
+		{
+			name: "Debian testing", platform: "debian", version: "forky/sid",
+			osRelease: "ID=debian\nVERSION_CODENAME=forky\n", wantPlatform: "debian", wantVersion: "forky/sid",
+		},
+		{
+			name: "derivative without version", platform: "debian", version: "forky/sid",
+			osRelease: "ID='example'\nID_LIKE=debian\n", wantPlatform: "example",
+		},
+		{
+			name: "legacy Debian", platform: "debian", version: "7.11",
+			wantPlatform: "debian", wantVersion: "7.11",
+		},
+		{
+			name: "other gopsutil platform", platform: "redhat", version: "9.6",
+			osRelease: "ID=rhel\nVERSION_ID=9.6\n", wantPlatform: "redhat", wantVersion: "9.6",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			etcDir := t.TempDir()
+			if tt.osRelease != "" {
+				if err := os.WriteFile(filepath.Join(etcDir, "os-release"), []byte(tt.osRelease), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ctx := context.WithValue(t.Context(), common.EnvKey, common.EnvMap{common.HostEtcEnvKey: etcDir})
+			platform, version := linuxReportedPlatform(ctx, tt.platform, tt.version)
+			if platform != tt.wantPlatform || version != tt.wantVersion {
+				t.Fatalf("got %q %q, want %q %q", platform, version, tt.wantPlatform, tt.wantVersion)
+			}
+		})
 	}
 }
 
