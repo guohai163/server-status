@@ -13,4 +13,4 @@ fi
 ssh "$TARGET" "mkdir -p '$REMOTE_DIR'"
 scp compose.yaml "$TARGET:$REMOTE_DIR/"
 scp "$ENV_FILE" "$TARGET:$REMOTE_DIR/.env"
-ssh "$TARGET" "chmod 600 '$REMOTE_DIR/.env' && cd '$REMOTE_DIR' && docker compose pull && docker compose up -d --remove-orphans"
+ssh "$TARGET" "chmod 600 '$REMOTE_DIR/.env' && cd '$REMOTE_DIR' && docker compose -f compose.yaml pull && docker compose -f compose.yaml up -d --remove-orphans"

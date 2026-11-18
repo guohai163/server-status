@@ -1,6 +1,6 @@
 # Homepage 自定义 API 配置
 
-Server Status 提供一个面向 [Homepage Custom API](https://gethomepage.dev/widgets/services/customapi/) 组件的公开聚合接口，用于展示正常、离线和异常告警服务器数量。
+Server Status 提供聚合接口，用于在 Homepage 展示正常、离线和异常告警服务器数量。 [Homepage Custom API 文档](https://gethomepage.dev/widgets/services/customapi/)
 
 ## 接口
 
@@ -8,7 +8,7 @@ Server Status 提供一个面向 [Homepage Custom API](https://gethomepage.dev/w
 GET /api/v1/homepage
 ```
 
-该接口与公开看板采用相同的访问策略，不需要 Admin Token 或 Node Token。成功响应示例：
+该接口使用与看板相同的 HTTP Basic 凭据。用户名为 `viewer`，密码为 `SERVER_STATUS_WEB_ACCESS_KEY`。
 
 ```json
 {
@@ -32,7 +32,7 @@ GET /api/v1/homepage
 
 ## Homepage 配置
 
-编辑 Homepage 的 `services.yaml`，加入下面的服务。将示例域名替换为 Server Status 中心服务地址：
+编辑 Homepage 的 `services.yaml`，将示例域名替换为 Server Status 的 HTTPS 地址。把 `BASE64_VIEWER_AND_KEY` 替换为字符串 `viewer:实际看板密钥` 的 Base64 编码，并将该值作为密钥保管。
 
 ```yaml
 - 基础设施:
@@ -42,6 +42,8 @@ GET /api/v1/homepage
         widget:
           type: customapi
           url: https://status.example.com/api/v1/homepage
+          headers:
+            Authorization: "Basic BASE64_VIEWER_AND_KEY"
           refreshInterval: 60000
           mappings:
             - field: normal
@@ -59,33 +61,14 @@ GET /api/v1/homepage
 
 ## Docker 网络
 
-Homepage 在服务端请求 `widget.url`，该地址必须能从 Homepage 容器内部访问。Homepage 与 Server Status 位于同一个 Docker 网络时，可以使用中心服务的容器名，例如：
-
-```yaml
-widget:
-  type: customapi
-  url: http://server-status-central:8080/api/v1/homepage
-  refreshInterval: 60000
-  mappings:
-    - field: normal
-      label: 正常
-      format: number
-    - field: offline
-      label: 离线
-      format: number
-    - field: alerts
-      label: 告警
-      format: number
-```
-
-如果两个容器不共享网络，请使用 Homepage 容器可解析、可访问的反向代理域名或宿主机地址。`href` 是浏览器点击卡片时打开的地址，可以与容器内部使用的 `widget.url` 不同。
+Homepage 在服务端请求 `widget.url`，因此 HTTPS 域名需要能从 Homepage 容器内解析和访问。`href` 是浏览器点击卡片时打开的地址。
 
 ## 验证
 
 先从 Homepage 所在主机或容器验证接口：
 
 ```bash
-curl -fsS https://status.example.com/api/v1/homepage
+curl -fsS --user viewer https://status.example.com/api/v1/homepage
 ```
 
-返回包含 `normal`、`offline` 和 `alerts` 的 JSON 后，重新加载 Homepage 配置即可。
+按提示输入看板密钥。返回包含 `normal`、`offline` 和 `alerts` 的 JSON 后，重新加载 Homepage 配置。

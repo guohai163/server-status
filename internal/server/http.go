@@ -23,6 +23,7 @@ type API struct {
 	store              dataStore
 	logger             *slog.Logger
 	adminDigest        [32]byte
+	webAccessDigest    [32]byte
 	releases           *releaseCache
 	historyResponses   *historyResponseCache
 	nodeDeletions      *nodeDeletionManager
@@ -45,14 +46,15 @@ type dataStore interface {
 	ListAlerts(context.Context, store.AlertListOptions) (store.AlertList, error)
 }
 
-func NewAPI(database dataStore, adminToken string, logger *slog.Logger, releaseCacheDir string) *API {
+func NewAPI(database dataStore, config Config, logger *slog.Logger) *API {
 	latestAgentVersion, _ := appversion.Normalize(Version)
 	historyResponses := newHistoryResponseCache(30*time.Second, 256)
 	api := &API{
 		store:              database,
 		logger:             logger,
-		adminDigest:        sha256.Sum256([]byte(adminToken)),
-		releases:           newReleaseCache(releaseCacheDir, logger),
+		adminDigest:        sha256.Sum256([]byte(config.AdminToken)),
+		webAccessDigest:    sha256.Sum256([]byte(config.WebAccessKey)),
+		releases:           newReleaseCache(config.ReleaseCacheDir, logger),
 		historyResponses:   historyResponses,
 		nodeDeletions:      newNodeDeletionManager(database, logger, historyResponses.invalidateNode),
 		latestAgentVersion: latestAgentVersion,
@@ -61,11 +63,11 @@ func NewAPI(database dataStore, adminToken string, logger *slog.Logger, releaseC
 	api.mux.HandleFunc("GET /healthz", api.health)
 	api.mux.HandleFunc("GET /readyz", api.ready)
 	api.mux.HandleFunc("POST /api/v1/reports", api.report)
-	api.mux.HandleFunc("GET /api/v1/homepage", api.homepageSummary)
-	api.mux.HandleFunc("GET /api/v1/nodes", api.listNodes)
-	api.mux.HandleFunc("GET /api/v1/alerts", api.listAlerts)
-	api.mux.HandleFunc("GET /api/v1/nodes/{nodeID}", api.getNode)
-	api.mux.HandleFunc("GET /api/v1/nodes/{nodeID}/history", api.getNodeHistory)
+	api.mux.HandleFunc("GET /api/v1/homepage", api.requireWebAccess(api.homepageSummary))
+	api.mux.HandleFunc("GET /api/v1/nodes", api.requireWebAccess(api.listNodes))
+	api.mux.HandleFunc("GET /api/v1/alerts", api.requireWebAccess(api.listAlerts))
+	api.mux.HandleFunc("GET /api/v1/nodes/{nodeID}", api.requireWebAccess(api.getNode))
+	api.mux.HandleFunc("GET /api/v1/nodes/{nodeID}/history", api.requireWebAccess(api.getNodeHistory))
 	api.mux.HandleFunc("POST /api/v1/admin/nodes", api.requireAdmin(api.registerNode))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes", api.requireAdmin(api.listNodes))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes/export", api.requireAdmin(api.exportNodes))
@@ -522,6 +524,7 @@ func (api *API) logging(next http.Handler) http.Handler {
 func (api *API) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("X-Content-Type-Options", "nosniff")
+		response.Header().Set("Referrer-Policy", "no-referrer")
 		response.Header().Set("Cache-Control", "no-store")
 		next.ServeHTTP(response, request)
 	})

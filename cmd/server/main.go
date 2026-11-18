@@ -30,7 +30,7 @@ func main() {
 	}
 	defer database.Close()
 
-	api := appserver.NewAPI(database, config.AdminToken, logger, config.ReleaseCacheDir)
+	api := appserver.NewAPI(database, config, logger)
 	defer api.Close()
 	httpServer := &http.Server{
 		Addr:              config.ListenAddress,
@@ -39,6 +39,7 @@ func main() {
 		ReadTimeout:       config.ReadTimeout,
 		WriteTimeout:      config.WriteTimeout,
 		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    32 << 10,
 	}
 	serverErrors := make(chan error, 1)
 	go func() {

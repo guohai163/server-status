@@ -157,7 +157,6 @@ func (cache *historyResponseCache) invalidateNode(nodeID string) {
 
 func writeHistoryResponse(response http.ResponseWriter, request *http.Request, cached cachedHistoryResponse, cacheHit bool) {
 	response.Header().Set("Content-Type", "application/json")
-	response.Header().Set("Cache-Control", "public, max-age=30, stale-while-revalidate=30")
 	response.Header().Set("ETag", cached.etag)
 	response.Header().Set("Vary", "Accept-Encoding")
 	if cacheHit {

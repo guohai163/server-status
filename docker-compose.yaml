@@ -1,0 +1,53 @@
+services:
+  central:
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      SERVER_STATUS_DATABASE_URL: ${SERVER_STATUS_DATABASE_URL:?Set SERVER_STATUS_DATABASE_URL in .env}
+      SERVER_STATUS_WEB_ACCESS_KEY: ${SERVER_STATUS_WEB_ACCESS_KEY:?Set SERVER_STATUS_WEB_ACCESS_KEY in .env}
+      SERVER_STATUS_ADMIN_TOKEN: ${SERVER_STATUS_ADMIN_TOKEN:?Set SERVER_STATUS_ADMIN_TOKEN in .env}
+      SERVER_STATUS_LISTEN_ADDR: ":8080"
+      SERVER_STATUS_RELEASE_CACHE_DIR: /var/cache/server-status
+    volumes:
+      - agent_release_cache:/var/cache/server-status
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  caddy:
+    image: caddy:2.11.9-alpine
+    restart: unless-stopped
+    depends_on:
+      - central
+    environment:
+      SERVER_STATUS_DOMAIN: ${SERVER_STATUS_DOMAIN:?Set SERVER_STATUS_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  agent_release_cache:
+  caddy_data:
+  caddy_config:

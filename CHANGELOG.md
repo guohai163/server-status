@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.25.0 - 2026-11-18
+
+### Security
+- Require a separate `SERVER_STATUS_WEB_ACCESS_KEY` for the dashboard, alerts, static assets, and monitoring read APIs. Before upgrading, set this key in `.env`. Use HTTP Basic with username `viewer` and the dashboard key as the password. Update Homepage widgets to send the same credentials.
+- Prevent downstream caching of monitoring data and apply browser security headers to the dashboard.
+
+### Added
+- Provide a public Docker Compose deployment with automatic HTTPS via Caddy and a deployment guide. The prebuilt-image Compose configuration binds the central service to loopback by default.
+
 ## v0.24.1 - 2026-08-28
 
 ### Fixed

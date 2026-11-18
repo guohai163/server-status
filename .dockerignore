@@ -2,6 +2,8 @@
 .gitignore
 .DS_Store
 .env
+**/.env
+**/.env.*
 bin
 dist
 coverage.out

@@ -1,5 +1,7 @@
 # 当前部署
 
+本页记录已有的内网部署。新部署请按 [Docker 公网部署文档](docker-deployment.md) 配置 HTTPS 和看板密钥。
+
 ## 中央服务
 
 - SSH：`gydev@10.12.54.200`
@@ -19,9 +21,9 @@ ssh gydev@10.12.54.200 'docker ps --filter name=server-status-central'
 curl http://10.12.54.200:8080/readyz
 ```
 
-`scripts/deploy-central.sh` 会上传 `compose.yaml` 与 `.env`，在中心机执行 `docker compose pull` 后重建容器，不再上传源码或在中心机编译镜像。
+`scripts/deploy-central.sh` 会上传 `compose.yaml` 与 `.env`，在中心机拉取指定镜像后重建容器。升级到包含看板鉴权的镜像时，在 `.env` 配置 `SERVER_STATUS_WEB_ACCESS_KEY` 和 `SERVER_STATUS_CENTRAL_IMAGE`。
 
-浏览器访问 `http://10.12.54.200:8080/` 即可打开无需鉴权的节点看板。公开范围只包括状态展示接口；节点上报和节点注册仍需要各自的 Bearer Token。
+新版 `compose.yaml` 默认绑定 `127.0.0.1:8080`，可由同一宿主机上的 HTTPS 反向代理提供访问。升级后，用 `viewer` 和看板密钥打开页面，用 Node Token 上报，用 Admin Token 注册节点。
 
 数据库使用专用登录角色 `server_status_app`，该角色只继承 `server_status_writer`，没有超级用户、建库或建角色权限。
 
@@ -102,7 +104,7 @@ ssh gydev@10.12.54.169 'tail -f ~/.local/state/server-status-agent/agent.log'
 ```bash
 ssh -p 63008 root@10.12.54.140 'pgrep -af server-status-agent'
 ssh -p 63008 -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa root@10.12.54.1 'pgrep -af server-status-agent'
-curl http://10.12.54.200:8080/api/v1/nodes
+curl --user viewer https://status.example.com/api/v1/nodes
 ```
 
 ## 更新

@@ -20,6 +20,7 @@ import (
 )
 
 const testAdminToken = "admin-token-with-at-least-thirty-two-characters"
+const testWebAccessKey = "dashboard-key-with-at-least-thirty-two-characters"
 
 type fakeStore struct {
 	auth                        store.NodeAuth
@@ -231,20 +232,63 @@ func TestAdminRegistrationRequiresAdminToken(t *testing.T) {
 	}
 }
 
-func TestPublicNodeListDoesNotRequireAuthentication(t *testing.T) {
+func TestDashboardRoutesRequireWebAccessKey(t *testing.T) {
 	api, _ := testAPI()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes", nil)
+	t.Cleanup(api.Close)
+	handler := api.Handler()
+	nodePath := "/api/v1/nodes/10000000-0000-4000-8000-000000000001"
+	for _, path := range []string{
+		"/", "/alerts", "/assets/app.js", "/api/v1/homepage",
+		"/api/v1/nodes", "/api/v1/alerts", nodePath, nodePath + "/history",
+	} {
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			request := httptest.NewRequest(method, path, nil)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusUnauthorized || response.Header().Get("WWW-Authenticate") == "" {
+				t.Errorf("%s %s: expected Basic auth challenge, got %d", method, path, response.Code)
+			}
+		}
+	}
+
+	for _, credentials := range [][2]string{
+		{"viewer", "wrong-key"}, {"viewer", testAdminToken}, {"wrong-user", testWebAccessKey},
+	} {
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.SetBasicAuth(credentials[0], credentials[1])
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Errorf("invalid credentials returned %d", response.Code)
+		}
+	}
+
+	for _, path := range []string{"/.env", "/index.html"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, webTestRequest(path))
+		if response.Code != http.StatusNotFound {
+			t.Errorf("%s: expected 404, got %d", path, response.Code)
+		}
+	}
+
+	redirect := httptest.NewRecorder()
+	handler.ServeHTTP(redirect, httptest.NewRequest(http.MethodGet, "/alerts/", nil))
+	if redirect.Code != http.StatusTemporaryRedirect || redirect.Header().Get("Location") != "/alerts" {
+		t.Errorf("expected /alerts/ to redirect to /alerts, got %d %q", redirect.Code, redirect.Header().Get("Location"))
+	}
+
+	request := webTestRequest("/api/v1/admin/nodes")
 	response := httptest.NewRecorder()
-	api.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("expected public list to return 200, got %d: %s", response.Code, response.Body.String())
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Errorf("dashboard credentials reached admin API: %d", response.Code)
 	}
 }
 
-func TestHomepageSummaryIsPublicAndReturnsCounts(t *testing.T) {
+func TestHomepageSummaryReturnsCounts(t *testing.T) {
 	api, database := testAPI()
 	database.homepageSummary = store.HomepageSummary{Normal: 8, Offline: 2, Alerts: 1}
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/homepage", nil)
+	request := webTestRequest("/api/v1/homepage")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -259,7 +303,7 @@ func TestHomepageSummaryIsPublicAndReturnsCounts(t *testing.T) {
 	}
 }
 
-func TestPublicNodeListIncludesLoadAveragesAndCapacities(t *testing.T) {
+func TestNodeListIncludesLoadAveragesAndCapacities(t *testing.T) {
 	api, database := testAPI()
 	database.nodes = []store.NodeSummary{{
 		NodeID: "10000000-0000-4000-8000-000000000001",
@@ -267,7 +311,7 @@ func TestPublicNodeListIncludesLoadAveragesAndCapacities(t *testing.T) {
 		MemoryTotalBytes: 8 << 30, DiskTotalBytes: 100 << 30, HasNVIDIAGPU: true,
 		Tags: []string{"production", "gpu"},
 	}}
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes", nil)
+	request := webTestRequest("/api/v1/nodes")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -329,7 +373,7 @@ func TestNodeExportReturnsExcelWorkbook(t *testing.T) {
 
 func TestWebDashboardIsServed(t *testing.T) {
 	api, _ := testAPI()
-	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request := webTestRequest("/")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -355,7 +399,7 @@ func TestWebDashboardIsServed(t *testing.T) {
 
 func TestWebDashboardDeletesNodesThroughAdminAPI(t *testing.T) {
 	api, _ := testAPI()
-	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	request := webTestRequest("/assets/app.js")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -378,10 +422,9 @@ func TestAlertPageAndScriptAreServed(t *testing.T) {
 	api, _ := testAPI()
 	for path, expected := range map[string][]string{
 		"/alerts":           {"告警日志", "alert-category-filter", "/assets/alerts.js"},
-		"/alerts/":          {"告警日志", "alerts-table-body"},
 		"/assets/alerts.js": {"/api/v1/alerts", "next_cursor", "30000", "data-alert-state"},
 	} {
-		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request := webTestRequest(path)
 		response := httptest.NewRecorder()
 		api.Handler().ServeHTTP(response, request)
 		if response.Code != http.StatusOK {
@@ -395,13 +438,13 @@ func TestAlertPageAndScriptAreServed(t *testing.T) {
 	}
 }
 
-func TestListAlertsDefaultsAndIsPublic(t *testing.T) {
+func TestListAlertsDefaults(t *testing.T) {
 	api, database := testAPI()
 	database.alerts = store.AlertList{
 		Alerts:  []store.AlertEvent{{AlertID: "40000000-0000-4000-8000-000000000001", Severity: "critical"}},
 		Summary: store.AlertSummary{OpenTotal: 1, Critical: 1, AffectedNodes: 1},
 	}
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/alerts", nil)
+	request := webTestRequest("/api/v1/alerts")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -418,7 +461,7 @@ func TestListAlertsDefaultsAndIsPublic(t *testing.T) {
 func TestListAlertsPassesFiltersAndHistoryRange(t *testing.T) {
 	api, database := testAPI()
 	before := time.Now().UTC().Add(-30 * 24 * time.Hour)
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/alerts?state=resolved&category=smart&severity=warning&node_id=10000000-0000-4000-8000-000000000001&range=30d&limit=25&cursor=next", nil)
+	request := webTestRequest("/api/v1/alerts?state=resolved&category=smart&severity=warning&node_id=10000000-0000-4000-8000-000000000001&range=30d&limit=25&cursor=next")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -439,7 +482,7 @@ func TestListAlertsRejectsInvalidParameters(t *testing.T) {
 	}
 	for _, query := range tests {
 		api, _ := testAPI()
-		request := httptest.NewRequest(http.MethodGet, "/api/v1/alerts?"+query, nil)
+		request := webTestRequest("/api/v1/alerts?" + query)
 		response := httptest.NewRecorder()
 		api.Handler().ServeHTTP(response, request)
 		if response.Code != http.StatusBadRequest {
@@ -451,7 +494,7 @@ func TestListAlertsRejectsInvalidParameters(t *testing.T) {
 func TestListAlertsRejectsInvalidCursorFromStore(t *testing.T) {
 	api, database := testAPI()
 	database.alertsErr = store.ErrInvalidAlertQuery
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/alerts?cursor=bad", nil)
+	request := webTestRequest("/api/v1/alerts?cursor=bad")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
@@ -461,7 +504,7 @@ func TestListAlertsRejectsInvalidCursorFromStore(t *testing.T) {
 
 func TestFaviconIsServed(t *testing.T) {
 	api, _ := testAPI()
-	request := httptest.NewRequest(http.MethodGet, "/assets/favicon.ico", nil)
+	request := webTestRequest("/assets/favicon.ico")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -474,7 +517,7 @@ func TestFaviconIsServed(t *testing.T) {
 
 func TestNVIDIAIconIsServed(t *testing.T) {
 	api, _ := testAPI()
-	request := httptest.NewRequest(http.MethodGet, "/assets/nvidia.svg", nil)
+	request := webTestRequest("/assets/nvidia.svg")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -546,7 +589,7 @@ func TestMacOSAgentInstallerIsServedWithoutCaching(t *testing.T) {
 
 func TestWebUIRunsMacOSInstallerInsideForegroundSudo(t *testing.T) {
 	api, _ := testAPI()
-	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	request := webTestRequest("/assets/app.js")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -590,7 +633,7 @@ func TestWebUIIncludesWindowsAgentUpgradeCommand(t *testing.T) {
 			"System.Net.ServicePointManager]::SecurityProtocol -bor 3072",
 		},
 	} {
-		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request := webTestRequest(path)
 		response := httptest.NewRecorder()
 		api.Handler().ServeHTTP(response, request)
 		if response.Code != http.StatusOK {
@@ -609,7 +652,7 @@ func TestWebUIIncludesWindowsAgentUpgradeCommand(t *testing.T) {
 
 func TestWebUIBuildsAtomicWindowsCommands(t *testing.T) {
 	api, _ := testAPI()
-	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	request := webTestRequest("/assets/app.js")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -649,7 +692,7 @@ func TestWebUIBuildsAtomicWindowsCommands(t *testing.T) {
 
 func TestWebUILoadsNodeDetailBeforeHistory(t *testing.T) {
 	api, _ := testAPI()
-	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	request := webTestRequest("/assets/app.js")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -668,7 +711,7 @@ func TestWebUILoadsNodeDetailBeforeHistory(t *testing.T) {
 
 func TestWebUIPrioritizesReportedSMARTStatus(t *testing.T) {
 	api, _ := testAPI()
-	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	request := webTestRequest("/assets/app.js")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -697,7 +740,7 @@ func TestWebUIPrioritizesReportedSMARTStatus(t *testing.T) {
 
 func TestWebUIShowsKVMVirtualMachineInventory(t *testing.T) {
 	api, _ := testAPI()
-	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	request := webTestRequest("/assets/app.js")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -715,7 +758,7 @@ func TestWebUIShowsKVMVirtualMachineInventory(t *testing.T) {
 
 func TestWebUIShowsRAIDControllerTopologyAndRebuildProgress(t *testing.T) {
 	api, _ := testAPI()
-	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	request := webTestRequest("/assets/app.js")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -735,7 +778,7 @@ func TestWebUIShowsRAIDControllerTopologyAndRebuildProgress(t *testing.T) {
 
 func TestWebUIShowsHardwareSensorsOnlyForPhysicalNodes(t *testing.T) {
 	api, _ := testAPI()
-	request := httptest.NewRequest(http.MethodGet, "/assets/app.js", nil)
+	request := webTestRequest("/assets/app.js")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -754,7 +797,7 @@ func TestWebUIShowsHardwareSensorsOnlyForPhysicalNodes(t *testing.T) {
 
 func TestHistoryRangeValidation(t *testing.T) {
 	api, _ := testAPI()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes/10000000-0000-4000-8000-000000000001/history?range=forever", nil)
+	request := webTestRequest("/api/v1/nodes/10000000-0000-4000-8000-000000000001/history?range=forever")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
@@ -770,7 +813,7 @@ func TestNodeHistoryResponseIsCompressedCachedAndRevalidated(t *testing.T) {
 		Points: []store.HistoryPoint{{BucketAt: time.Now().UTC(), CPUUsagePercent: 25}},
 	}
 
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes/"+nodeID+"/history?range=24h", nil)
+	request := webTestRequest("/api/v1/nodes/" + nodeID + "/history?range=24h")
 	request.Header.Set("Accept-Encoding", "gzip")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
@@ -779,6 +822,9 @@ func TestNodeHistoryResponseIsCompressedCachedAndRevalidated(t *testing.T) {
 	}
 	if response.Header().Get("Content-Encoding") != "gzip" {
 		t.Fatal("history response was not compressed")
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("history response allows downstream caching")
 	}
 	if response.Header().Get("X-Server-Status-Cache") != "MISS" {
 		t.Fatal("first history response was not marked as a cache miss")
@@ -805,6 +851,14 @@ func TestNodeHistoryResponseIsCompressedCachedAndRevalidated(t *testing.T) {
 
 	etag := response.Header().Get("ETag")
 	request = httptest.NewRequest(http.MethodGet, "/api/v1/nodes/"+nodeID+"/history?range=24h", nil)
+	request.Header.Set("If-None-Match", etag)
+	response = httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated history revalidation returned %d", response.Code)
+	}
+
+	request = webTestRequest("/api/v1/nodes/" + nodeID + "/history?range=24h")
 	request.Header.Set("If-None-Match", etag)
 	response = httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
@@ -1126,7 +1180,13 @@ func testAPI() (*API, *fakeStore) {
 
 func testAPIWithStore(database dataStore) *API {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewAPI(database, testAdminToken, logger, "")
+	return NewAPI(database, Config{AdminToken: testAdminToken, WebAccessKey: testWebAccessKey}, logger)
+}
+
+func webTestRequest(path string) *http.Request {
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	request.SetBasicAuth("viewer", testWebAccessKey)
+	return request
 }
 
 func waitForNodeDeletionStatus(t *testing.T, api *API, nodeID, want string) nodeDeletionTask {

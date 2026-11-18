@@ -1,14 +1,15 @@
 services:
   central:
-    image: ${SERVER_STATUS_CENTRAL_IMAGE:-ghcr.io/guohai163/server-status-central:0.8.0}
+    image: ${SERVER_STATUS_CENTRAL_IMAGE:?Set SERVER_STATUS_CENTRAL_IMAGE to a build with dashboard authentication}
     container_name: server-status-central
     restart: unless-stopped
     env_file:
       - .env
     environment:
+      SERVER_STATUS_WEB_ACCESS_KEY: ${SERVER_STATUS_WEB_ACCESS_KEY:?Set SERVER_STATUS_WEB_ACCESS_KEY in .env}
       SERVER_STATUS_RELEASE_CACHE_DIR: /var/cache/server-status
     ports:
-      - "8080:8080"
+      - "${SERVER_STATUS_BIND_ADDR:-127.0.0.1}:8080:8080"
     volumes:
       - agent_release_cache:/var/cache/server-status
     read_only: true

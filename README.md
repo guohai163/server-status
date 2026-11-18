@@ -76,7 +76,7 @@ flowchart TD
     L --> M["替换该分钟的资源明细与较新的健康快照"]
     M --> N["触发器更新 current 表"]
     N --> O["提交事务并返回 202 Accepted"]
-    O --> P["公开状态 API / Web 仪表盘查询"]
+    O --> P["受密钥保护的状态 API / Web 仪表盘查询"]
     Q["每分钟告警评估"] --> S["产生、更新或恢复告警事件"]
     L --> Q
     Q --> P
@@ -150,6 +150,10 @@ docker pull ghcr.io/guohai163/server-status-central:0.3.2
 
 ## 部署中心服务
 
+公网部署使用带 Caddy 的 `docker-compose.yaml`，从当前源码构建镜像并通过 HTTPS 提供服务。完整步骤见 [Docker 公网部署文档](docs/docker-deployment.md)。
+
+以下为使用预构建镜像和独立反向代理时的部署方式。
+
 ### 1. 初始化数据库
 
 按顺序执行 `db/migrations` 中的 SQL：
@@ -182,10 +186,11 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V018__raid_aware_storage_summary.sql
 参考 `deploy/central.env.example`，在仓库外创建一个权限为 `0600` 的环境文件：
 
 ```dotenv
-SERVER_STATUS_DATABASE_URL=postgres://server_status_app:password@postgres:5432/server_status_db?sslmode=disable
+SERVER_STATUS_DATABASE_URL=postgres://server_status_app:password@postgres:5432/server_status_db?sslmode=verify-full
 SERVER_STATUS_ADMIN_TOKEN=至少32位随机字符串
+SERVER_STATUS_WEB_ACCESS_KEY=另一条至少32位的随机字符串
 SERVER_STATUS_LISTEN_ADDR=:8080
-SERVER_STATUS_CENTRAL_IMAGE=ghcr.io/guohai163/server-status-central:0.8.0
+SERVER_STATUS_CENTRAL_IMAGE=包含看板鉴权的镜像及版本
 ```
 
 Admin Token 只用于节点注册、令牌轮换、节点删除和管理员查询。
@@ -199,14 +204,14 @@ SERVER_STATUS_CENTRAL_ENV_FILE=/secure/central.env ./scripts/deploy-central.sh
 脚本默认部署到 `gydev@10.12.54.200:~/server-status-central`，只上传 Compose 与环境文件，然后拉取固定版本的 GHCR 镜像。也可以直接在中心机执行：
 
 ```bash
-docker compose pull
-docker compose up -d --remove-orphans
+docker compose -f compose.yaml pull
+docker compose -f compose.yaml up -d --remove-orphans
 curl http://127.0.0.1:8080/readyz
 ```
 
 中心容器使用非 root 用户、只读根文件系统、移除全部 capabilities，并配置 `unless-stopped` 自动恢复。Compose 会挂载独立的 `agent_release_cache` 持久卷，用于缓存 Agent Release 资产。
 
-部署完成后直接访问 `http://中心节点地址:8080/`。Web 看板不需要登录：首屏以卡片显示所有节点的机器名、IP、Tag、CPU、内存、磁盘使用率和磁盘读写速率，并可在页面顶部按 Tag 筛选；点击卡片进入硬件、文件系统、网卡和历史趋势详情，KVM 宿主机会列出 libvirt 虚拟机的名称、状态、vCPU、内存、磁盘和系统信息，GPU 节点会按每张卡分别显示核心和显存使用率趋势，实体机详情还会显示风扇、电压、电流和功率传感器。每个节点最多设置 5 个 Tag。使用 Admin Token 可从顶部导出全部机器的 Excel 清单，包含概览以及 CPU、内存、磁盘、文件系统、网卡和 GPU 明细。节点上报和管理接口仍分别使用 Node Token 与 Admin Token。浏览器在 Admin Token 成功通过鉴权后会将其保存到本地 30 天，期间添加节点、编辑 Tag、选择首页 IP 和导出无需重复填写；过期或接口返回 401 时自动清除。
+该 Compose 默认只绑定宿主机的 `127.0.0.1:8080`。通过 HTTPS 反向代理打开看板后，在浏览器提示框输入用户名 `viewer` 和 `SERVER_STATUS_WEB_ACCESS_KEY`。首屏卡片显示节点名、IP、Tag、资源使用率和磁盘速率，可按 Tag 筛选并查看详情。每个节点最多设置 5 个 Tag。节点上报使用 Node Token。注册、删除、编辑节点、设置首页 IP 以及导出 Excel 使用 Admin Token。浏览器最多保存已验证的 Admin Token 30 天，过期或管理接口返回 401 时清除。
 
 ## 一个脚本部署 Agent
 
@@ -258,16 +263,17 @@ macOS 节点在“添加节点”中选择 `macOS 11 及以上`。生成的命�
 | --- | --- | --- | --- |
 | `GET` | `/healthz` | 无 | 检查中心进程存活 |
 | `GET` | `/readyz` | 无 | 检查数据库和迁移就绪 |
-| `GET` | `/` | 无 | Web 节点状态看板 |
-| `GET` | `/alerts` | 无 | 当前告警与历史记录页面 |
+| `GET` | `/` | 看板密钥 | Web 节点状态看板 |
+| `GET` | `/alerts` | 看板密钥 | 当前告警与历史记录页面 |
+| `GET` | `/assets/*` | 看板密钥 | 页面静态资源 |
 | `GET` | `/install-agent.sh` | 无 | 获取无凭据的 Agent 安装器 |
 | `GET` | `/install-agent-macos.sh` | 无 | 获取无凭据的 macOS Agent 安装器 |
 | `GET` | `/agent/releases/{version}/{asset}` | 无 | 获取中心校验并缓存的 Agent Release 资产 |
-| `GET` | `/api/v1/homepage` | 无 | 为 Homepage Custom API 返回正常、离线和异常告警服务器数量；配置见 [Homepage 文档](docs/homepage.md) |
-| `GET` | `/api/v1/nodes` | 无 | 查询所有节点最新卡片数据 |
-| `GET` | `/api/v1/alerts?state=open` | 无 | 查询告警；支持 `state/category/severity/node_id/range/limit/cursor`，历史范围为 `24h/7d/30d/90d/365d` |
-| `GET` | `/api/v1/nodes/{node_id}` | 无 | 查询节点完整硬件与运行状态 |
-| `GET` | `/api/v1/nodes/{node_id}/history?range=24h` | 无 | 查询 `1h/6h/24h/7d/30d/90d` 历史趋势；24h 为 5 分钟、7d 以上为小时分辨率 |
+| `GET` | `/api/v1/homepage` | 看板密钥 | 返回正常、离线和异常告警服务器数量，配置见 [Homepage 文档](docs/homepage.md) |
+| `GET` | `/api/v1/nodes` | 看板密钥 | 查询所有节点最新卡片数据 |
+| `GET` | `/api/v1/alerts?state=open` | 看板密钥 | 查询告警。支持 `state/category/severity/node_id/range/limit/cursor`，历史范围为 `24h/7d/30d/90d/365d` |
+| `GET` | `/api/v1/nodes/{node_id}` | 看板密钥 | 查询节点完整硬件与运行状态 |
+| `GET` | `/api/v1/nodes/{node_id}/history?range=24h` | 看板密钥 | 查询 `1h/6h/24h/7d/30d/90d` 历史趋势。24h 为 5 分钟分辨率，7d 以上为小时分辨率 |
 | `POST` | `/api/v1/reports` | Node Token | 接收一分钟快照，并在需要时返回固定版本 Agent 更新指令 |
 | `POST` | `/api/v1/admin/nodes` | Admin Token | 注册节点或轮换节点 Token |
 | `GET` | `/api/v1/admin/nodes` | Admin Token | 查询节点状态列表 |
@@ -276,7 +282,7 @@ macOS 节点在“添加节点”中选择 `macOS 11 及以上`。生成的命�
 | `GET` | `/api/v1/admin/node-deletions/{node_id}` | Admin Token | 查询后台删除任务的 `queued/running/completed/failed` 状态 |
 | `PUT` | `/api/v1/admin/nodes/{node_id}/primary-network-interface` | Admin Token | 设置首页卡片 IP 使用的网络接口 |
 
-所有受保护接口使用：
+看板页面和读取接口使用 HTTP Basic，用户名为 `viewer`，密码为 `SERVER_STATUS_WEB_ACCESS_KEY`。节点上报和管理接口通过请求头发送对应的 Bearer Token。
 
 ```http
 Authorization: Bearer <token>
