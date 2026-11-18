@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.26.0 - 2026-11-18
+
+### Added
+- Let dashboard users choose automatic grouping, grouping by IPv4 subnet, or a single grid. Automatic grouping gives subnets their own section when at least four nodes match the current filters. The browser remembers the selected mode.
+
 ## v0.25.1 - 2026-11-18
 
 ### Added

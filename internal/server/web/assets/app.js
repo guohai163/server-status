@@ -44,6 +44,13 @@
   const adminTokenStorageKey = "server-status.admin-token";
   const adminTokenLifetimeMs = 30 * 24 * 60 * 60 * 1000;
   const storedAdminToken = loadStoredAdminToken();
+  const groupingModeStorageKey = "server-status.node-grouping";
+  const minimumGroupSize = 4;
+  const groupingModes = [
+    { value: "auto", label: `自动（满 ${minimumGroupSize} 台）` },
+    { value: "subnet", label: "按网段" },
+    { value: "none", label: "不分组" }
+  ];
   let nodes = [];
   let selectedRange = "24h";
   let currentDetail = null;
@@ -58,6 +65,7 @@
   let pendingDeleteNodeID = null;
   let selectedOS = "";
   let selectedTag = "";
+  let selectedGroupingMode = loadGroupingMode();
   let historyRequestSequence = 0;
 
   const chartColorVariables = {
@@ -109,6 +117,14 @@
   function currentAdminToken() {
     if (cachedAdminTokenExpiresAt <= Date.now()) clearStoredAdminToken();
     return cachedAdminToken;
+  }
+
+  function loadGroupingMode() {
+    try {
+      const stored = localStorage.getItem(groupingModeStorageKey);
+      if (groupingModes.some((mode) => mode.value === stored)) return stored;
+    } catch (_) { /* storage is unavailable */ }
+    return "auto";
   }
 
   function clamp(value, min, max) { return Math.min(max, Math.max(min, Number(value) || 0)); }
@@ -254,6 +270,31 @@
     </button>`;
   }
 
+  function nodeGrid(items) {
+    return `<div class="node-grid">${items.map(nodeCard).join("")}</div>`;
+  }
+
+  function renderNodeGroups(items) {
+    let groups = groupNodesBySubnet(items);
+    if (selectedGroupingMode === "none") return nodeGrid(groups.flatMap((group) => group.nodes));
+
+    if (selectedGroupingMode === "auto") {
+      const ungrouped = groups.filter((group) => group.nodes.length < minimumGroupSize).flatMap((group) => group.nodes);
+      groups = groups.filter((group) => group.nodes.length >= minimumGroupSize);
+      if (!groups.length) return nodeGrid(ungrouped);
+      if (ungrouped.length) groups.push({ label: "其他节点", nodes: ungrouped });
+    }
+
+    const sections = groups.map((group, index) => `<section class="node-group" aria-labelledby="node-group-${index}">
+      <div class="node-group-head">
+        <h2 id="node-group-${index}"><code>${escapeHTML(group.label)}</code></h2>
+        <span>${group.nodes.length} 台</span>
+      </div>
+      ${nodeGrid(group.nodes)}
+    </section>`).join("");
+    return `<div class="node-groups">${sections}</div>`;
+  }
+
   async function apiFetch(path) {
     const response = await fetch(path, { headers: { Accept: "application/json" } });
     if (!response.ok) {
@@ -286,6 +327,7 @@
 
   function renderList() {
     currentDetail = null;
+    const restoreGroupingFocus = document.activeElement?.id === "grouping-mode";
     const osLabels = new Map();
     const tagLabels = new Map();
     nodes.forEach((node) => {
@@ -309,21 +351,16 @@
       result[node.status] = (result[node.status] || 0) + 1;
       return result;
     }, {});
-    const groups = groupNodesBySubnet(visibleNodes).map((group, index) => `<section class="node-group" aria-labelledby="node-group-${index}">
-      <div class="node-group-head">
-        <h2 id="node-group-${index}"><code>${escapeHTML(group.label)}</code></h2>
-        <span>${group.nodes.length} 台</span>
-      </div>
-      <div class="node-grid">${group.nodes.map(nodeCard).join("")}</div>
-    </section>`).join("");
     const osOptions = availableOS.map((os) => `<option value="${escapeHTML(os.key)}"${os.key === selectedOS ? " selected" : ""}>${escapeHTML(os.label)}</option>`).join("");
     const tagOptions = availableTags.map((tag) => `<option value="${escapeHTML(tag.key)}"${tag.key === selectedTag ? " selected" : ""}>${escapeHTML(tag.label)}</option>`).join("");
+    const groupingOptions = groupingModes.map((mode) => `<option value="${mode.value}"${mode.value === selectedGroupingMode ? " selected" : ""}>${mode.label}</option>`).join("");
     const hasActiveFilter = selectedOS || selectedTag;
     app.innerHTML = `<div class="page-heading">
       <div><h1>节点状态</h1><p>${hasActiveFilter ? `${visibleNodes.length} / ${nodes.length}` : nodes.length} 台服务器的最新一分钟快照</p></div>
       <div class="list-tools">
         <label class="list-filter"><span>操作系统</span><select id="os-filter"${availableOS.length ? "" : " disabled"}><option value="">全部</option>${osOptions}</select></label>
         <label class="list-filter"><span>Tag</span><select id="tag-filter"${availableTags.length ? "" : " disabled"}><option value="">全部</option>${tagOptions}</select></label>
+        <label class="list-filter"><span>分组</span><select id="grouping-mode">${groupingOptions}</select></label>
         <div class="status-counts">
         <span class="status-count"><i class="status-dot online"></i>在线 <strong>${counts.online || 0}</strong></span>
         <span class="status-count"><i class="status-dot offline"></i>离线 <strong>${counts.offline || 0}</strong></span>
@@ -331,7 +368,7 @@
         ${counts.disabled ? `<span class="status-count"><i class="status-dot disabled"></i>禁用 <strong>${counts.disabled}</strong></span>` : ""}
         </div>
       </div>
-    </div>${visibleNodes.length ? `<div class="node-groups">${groups}</div>` : `<div class="empty-state"><strong>${nodes.length ? "没有匹配的节点" : "暂无节点"}</strong></div>`}`;
+    </div>${visibleNodes.length ? renderNodeGroups(visibleNodes) : `<div class="empty-state"><strong>${nodes.length ? "没有匹配的节点" : "暂无节点"}</strong></div>`}`;
     document.getElementById("os-filter").addEventListener("change", (event) => {
       selectedOS = event.target.value;
       renderList();
@@ -340,6 +377,13 @@
       selectedTag = event.target.value;
       renderList();
     });
+    const groupingSelect = document.getElementById("grouping-mode");
+    groupingSelect.addEventListener("change", (event) => {
+      selectedGroupingMode = event.target.value;
+      try { localStorage.setItem(groupingModeStorageKey, selectedGroupingMode); } catch (_) { /* storage is unavailable */ }
+      renderList();
+    });
+    if (restoreGroupingFocus) groupingSelect.focus({ preventScroll: true });
     app.querySelectorAll("[data-node-id]").forEach((card) => card.addEventListener("click", () => {
       location.hash = `node/${card.dataset.nodeId}`;
     }));
