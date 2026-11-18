@@ -1,0 +1,66 @@
+services:
+  central:
+    image: ghcr.io/guohai163/server-status-central:${SERVER_STATUS_VERSION:-0.25.1}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        server-status-server migrate
+        unset SERVER_STATUS_POSTGRES_ADMIN_PASSWORD
+        exec server-status-server
+    environment:
+      SERVER_STATUS_DATABASE_URL: "host=db dbname=server_status user=server_status_app sslmode=disable"
+      PGPASSWORD: ${SERVER_STATUS_DB_PASSWORD:?Set SERVER_STATUS_DB_PASSWORD in .env}
+      SERVER_STATUS_POSTGRES_ADMIN_PASSWORD: ${SERVER_STATUS_POSTGRES_ADMIN_PASSWORD:?Set SERVER_STATUS_POSTGRES_ADMIN_PASSWORD in .env}
+      SERVER_STATUS_WEB_ACCESS_KEY: ${SERVER_STATUS_WEB_ACCESS_KEY:?Set SERVER_STATUS_WEB_ACCESS_KEY in .env}
+      SERVER_STATUS_ADMIN_TOKEN: ${SERVER_STATUS_ADMIN_TOKEN:?Set SERVER_STATUS_ADMIN_TOKEN in .env}
+    ports:
+      - "${SERVER_STATUS_BIND_ADDR:-127.0.0.1}:${SERVER_STATUS_PORT:-8080}:8080"
+    networks:
+      - default
+      - database
+    volumes:
+      - agent_release_cache:/var/cache/server-status
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: server_status
+      POSTGRES_PASSWORD: ${SERVER_STATUS_POSTGRES_ADMIN_PASSWORD:?Set SERVER_STATUS_POSTGRES_ADMIN_PASSWORD in .env}
+    networks:
+      - database
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "server_status"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+networks:
+  database:
+    internal: true
+
+volumes:
+  postgres_data:
+  agent_release_cache:

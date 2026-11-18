@@ -138,6 +138,11 @@ jobs:
         run: ./scripts/build-release-windows-agent.sh "$GITHUB_REF_NAME" dist/release
       - name: Build macOS Agent script
         run: ./scripts/build-release-macos-agent.sh "$GITHUB_REF_NAME" dist/release
+      - name: Package standalone Compose deployment
+        run: |
+          cp docker-compose.yml dist/release/docker-compose.yml
+          sed "s/^SERVER_STATUS_VERSION=.*/SERVER_STATUS_VERSION=${GITHUB_REF_NAME#v}/" \
+            .env.example > dist/release/server-status.env.example
       - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -238,6 +243,8 @@ jobs:
             --jq '.assets[].name')
           for expected in \
             checksums.txt \
+            docker-compose.yml \
+            server-status.env.example \
             server-status-agent-linux-amd64 \
             server-status-agent-linux-arm64 \
             server-status-agent-macos \
@@ -264,6 +271,29 @@ jobs:
           docker buildx imagetools inspect "$IMAGE:$version" > image-manifest.txt
           grep -Fq "linux/amd64" image-manifest.txt
           grep -Fq "linux/arm64" image-manifest.txt
+      - name: Start a fresh deployment from the two release files
+        shell: bash
+        run: |
+          set -eu
+          cd "$(mktemp -d)"
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          curl -fsSL "$base/docker-compose.yml" -o docker-compose.yml
+          curl -fsSL "$base/server-status.env.example" -o .env
+          grep -Fxq "SERVER_STATUS_VERSION=${GITHUB_REF_NAME#v}" .env
+          key="$(openssl rand -hex 32)"
+          umask 077
+          chmod 600 .env
+          sed -i \
+            -e "s/^SERVER_STATUS_POSTGRES_ADMIN_PASSWORD=$/SERVER_STATUS_POSTGRES_ADMIN_PASSWORD=$(openssl rand -hex 32)/" \
+            -e "s/^SERVER_STATUS_DB_PASSWORD=$/SERVER_STATUS_DB_PASSWORD=$(openssl rand -hex 32)/" \
+            -e "s/^SERVER_STATUS_WEB_ACCESS_KEY=$/SERVER_STATUS_WEB_ACCESS_KEY=$key/" \
+            -e "s/^SERVER_STATUS_ADMIN_TOKEN=$/SERVER_STATUS_ADMIN_TOKEN=$(openssl rand -hex 32)/" .env
+          trap 'status=$?; if [ "$status" -ne 0 ]; then docker compose logs --tail=100; fi; docker compose down -v' EXIT
+          docker compose up -d --wait --wait-timeout 120
+          test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/)" = 401
+          curl -fsS --user "viewer:$key" http://127.0.0.1:8080/api/v1/nodes
+          docker compose up -d --force-recreate --wait --wait-timeout 120
+          curl -fsS --user "viewer:$key" http://127.0.0.1:8080/api/v1/nodes
       - name: Verify Agent assets bundled in central image
         shell: bash
         run: |

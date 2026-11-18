@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.25.1 - 2026-11-18
+
+### Added
+- Publish a standalone Docker Compose file and an annotated environment template for launching the prebuilt application and PostgreSQL from an empty directory.
+- Initialize and migrate the bundled PostgreSQL database at startup, then serve requests with a dedicated database writer login.
+
+### Fixed
+- Apply the ARM CPU topology migration on fresh databases whose baseline already defines the topology columns and constraint.
+
 ## v0.25.0 - 2026-11-18
 
 ### Security

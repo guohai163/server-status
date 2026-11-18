@@ -1,6 +1,6 @@
 # 当前部署
 
-本页记录已有的内网部署。新部署请按 [Docker 公网部署文档](docker-deployment.md) 配置 HTTPS 和看板密钥。
+本页记录已有的内网部署。新部署可使用 [Docker 两文件部署](docker-deployment.md)。
 
 ## 中央服务
 

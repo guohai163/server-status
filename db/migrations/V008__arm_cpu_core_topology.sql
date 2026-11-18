@@ -5,12 +5,25 @@ SET ROLE server_status_owner;
 SET search_path = monitoring, pg_catalog;
 
 ALTER TABLE cpu_packages
-    ADD COLUMN performance_cores integer NOT NULL DEFAULT 0 CHECK (performance_cores >= 0),
-    ADD COLUMN efficiency_cores integer NOT NULL DEFAULT 0 CHECK (efficiency_cores >= 0),
-    ADD CONSTRAINT cpu_packages_core_topology_check CHECK (
-        performance_cores + efficiency_cores = 0 OR
-        performance_cores + efficiency_cores = physical_cores
-    );
+    ADD COLUMN IF NOT EXISTS performance_cores integer NOT NULL DEFAULT 0 CHECK (performance_cores >= 0),
+    ADD COLUMN IF NOT EXISTS efficiency_cores integer NOT NULL DEFAULT 0 CHECK (efficiency_cores >= 0);
+
+-- Current V001 already defines this constraint on a clean installation.
+DO $topology$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'cpu_packages'::regclass
+            AND conname = 'cpu_packages_core_topology_check'
+    ) THEN
+        ALTER TABLE cpu_packages
+            ADD CONSTRAINT cpu_packages_core_topology_check CHECK (
+                performance_cores + efficiency_cores = 0 OR
+                performance_cores + efficiency_cores = physical_cores
+            );
+    END IF;
+END
+$topology$;
 
 COMMENT ON COLUMN cpu_packages.performance_cores IS
     'Performance-class physical cores reported for heterogeneous ARM packages.';

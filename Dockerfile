@@ -5,6 +5,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
+COPY db ./db
 COPY internal ./internal
 COPY scripts/build-release-agent.sh scripts/write-release-checksums.sh ./scripts/
 ARG VERSION

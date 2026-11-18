@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/guohai/server-status/db"
 	appserver "github.com/guohai/server-status/internal/server"
 	"github.com/guohai/server-status/internal/store"
 )
@@ -23,6 +24,17 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if len(os.Args) == 2 && os.Args[1] == "migrate" {
+		migrationCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		err := db.MigrateComposeDatabase(migrationCtx, config.DatabaseURL, os.Getenv("SERVER_STATUS_POSTGRES_ADMIN_PASSWORD"))
+		cancel()
+		if err != nil {
+			logger.Error("database migration failed", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("database migrations complete")
+		return
+	}
 	database, err := store.New(ctx, config.DatabaseURL)
 	if err != nil {
 		logger.Error("database initialization failed", "error", err)

@@ -150,7 +150,7 @@ docker pull ghcr.io/guohai163/server-status-central:0.3.2
 
 ## 部署中心服务
 
-公网部署使用带 Caddy 的 `docker-compose.yaml`，从当前源码构建镜像并通过 HTTPS 提供服务。完整步骤见 [Docker 公网部署文档](docs/docker-deployment.md)。
+新部署可以下载 `docker-compose.yml` 和带注释的 `.env`，填写密码后直接启动应用和 PostgreSQL。 [Docker 两文件部署](docs/docker-deployment.md)
 
 以下为使用预构建镜像和独立反向代理时的部署方式。
 
