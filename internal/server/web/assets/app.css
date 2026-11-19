@@ -258,6 +258,7 @@ button { color: inherit; }
 .chart-tooltip { position: absolute; z-index: 3; top: 8px; min-width: 145px; padding: 7px 8px; pointer-events: none; border: 1px solid var(--control-line); border-radius: 4px; background: var(--tooltip-bg); box-shadow: 0 4px 14px var(--tooltip-shadow); color: var(--muted); font-size: 10px; line-height: 16px; }
 .chart-tooltip strong { color: var(--ink); }
 
+.section-head .traffic-filter { flex: none; }
 .traffic-month { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 24px; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 20px; }
 .traffic-month h3 { color: var(--ink); }
 .traffic-month strong { color: var(--ink); font-size: 24px; line-height: 30px; }

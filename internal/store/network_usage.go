@@ -27,11 +27,20 @@ type NodeNetworkUsage struct {
 	MonthDaysSeen int                `json:"month_days_seen"`
 }
 
-// GetNodeNetworkUsage sums the reported receive and transmit deltas across a node's interfaces.
-func (store *Store) GetNodeNetworkUsage(ctx context.Context, nodeID string) (NodeNetworkUsage, error) {
+// GetNodeNetworkUsage sums the reported deltas for an interface, or for the whole node when interfaceID is empty.
+func (store *Store) GetNodeNetworkUsage(ctx context.Context, nodeID, interfaceID string) (NodeNetworkUsage, error) {
 	var exists bool
-	if err := store.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM monitoring.nodes WHERE id = $1::uuid)`, nodeID).Scan(&exists); err != nil {
-		return NodeNetworkUsage{}, fmt.Errorf("check network usage node: %w", err)
+	if err := store.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM monitoring.nodes WHERE id = $1::uuid AND (
+				$2 = '' OR EXISTS (
+					SELECT 1 FROM monitoring.network_interfaces
+					 WHERE node_id = $1::uuid AND id = NULLIF($2, '')::uuid
+				)
+			)
+		)
+	`, nodeID, interfaceID).Scan(&exists); err != nil {
+		return NodeNetworkUsage{}, fmt.Errorf("check network usage node and interface: %w", err)
 	}
 	if !exists {
 		return NodeNetworkUsage{}, ErrNotFound
@@ -50,7 +59,7 @@ func (store *Store) GetNodeNetworkUsage(ctx context.Context, nodeID string) (Nod
 	// Raw partitions cover at least seven full UTC days plus today. Use raw samples
 	// throughout that period to include the current hour and any late reports.
 	rawStart := now.Truncate(24*time.Hour).AddDate(0, 0, -7)
-	rows, err := store.pool.Query(ctx, nodeNetworkUsageSQL, nodeID, start.UTC(), rawStart, now)
+	rows, err := store.pool.Query(ctx, nodeNetworkUsageSQL, nodeID, start.UTC(), rawStart, now, interfaceID)
 	if err != nil {
 		return NodeNetworkUsage{}, fmt.Errorf("query network usage: %w", err)
 	}
@@ -104,10 +113,12 @@ const nodeNetworkUsageSQL = `
 		SELECT hour_at AS sample_at, rx_bytes, tx_bytes
 		  FROM monitoring.network_metric_hourly
 		 WHERE node_id = $1::uuid AND hour_at >= $2 AND hour_at < $3
+		   AND ($5 = '' OR interface_id = NULLIF($5, '')::uuid)
 		UNION ALL
 		SELECT bucket_at, rx_bytes_delta, tx_bytes_delta
 		  FROM monitoring.network_metric_samples
 		 WHERE node_id = $1::uuid AND bucket_at >= $3 AND bucket_at < $4
+		   AND ($5 = '' OR interface_id = NULLIF($5, '')::uuid)
 	  ) traffic
 	 GROUP BY 1
 `

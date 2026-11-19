@@ -54,6 +54,7 @@
   let nodes = [];
   let selectedRange = "24h";
   let selectedResourceRanking = "cpu";
+  const trafficInterfaceByNode = new Map();
   let currentDetail = null;
   let currentHistory = { points: [], gpus: [] };
   let currentGPUDevices = [];
@@ -405,7 +406,6 @@
       const previousHistory = currentHistory.node_id === nodeID && currentHistory.range === selectedRange
         ? currentHistory : { resolution: "loading", points: [], gpus: [] };
       renderDetail(detail, previousHistory);
-      loadNetworkUsage(nodeID, app.querySelector("[data-network-usage]"));
       const historySubtitle = app.querySelector("[data-history-subtitle]");
       if (historySubtitle) historySubtitle.textContent = historyResolutionLabel("loading");
       updatedAt.textContent = `更新于 ${formatTime(new Date(), true)}`;
@@ -440,6 +440,7 @@
   function renderDetail(detail, history) {
     const node = detail.node;
     const focusedResource = document.activeElement?.dataset.rankResource;
+    const trafficSelectFocused = document.activeElement?.id === "traffic-interface";
     currentGPUDevices = detail.gpus || [];
     const alias = node.display_name && node.hostname !== "pending-registration" && node.hostname !== node.display_name && node.hostname !== node.primary_ip
       ? `<span>${escapeHTML(node.hostname)}</span>` : "";
@@ -478,10 +479,7 @@
       </div>
       <div class="chart-grid gpu-history-grid" id="gpu-history-grid"></div>
     </section>
-    <section class="section">
-      <div class="section-head"><div><h2>网络流量</h2><p>各网卡收发合计 · 北京时间</p></div></div>
-      <div class="chart-panel" data-network-usage><div class="empty-inline">正在读取网络流量</div></div>
-    </section>
+    ${networkUsageSection(detail.network || [])}
     <section class="section"><div class="section-head"><div><h2>硬件信息</h2><p>${node.system_model ? `服务器型号：${escapeHTML(node.system_model)} · ` : ""}${escapeHTML(node.architecture)} · Agent ${escapeHTML(node.agent_version)}</p></div></div>
       <div class="info-grid">
         <div class="info-block"><h3>CPU</h3>${cpuTable(detail.cpu_packages)}</div>
@@ -513,6 +511,9 @@
     app.querySelectorAll("[data-primary-interface-id]").forEach((button) => button.addEventListener("click", () => {
       selectPrimaryNetworkInterface(node.node_id, button.dataset.primaryInterfaceId, button.dataset.interfaceName, button);
     }));
+    const trafficSelect = app.querySelector("#traffic-interface");
+    if (trafficSelectFocused) trafficSelect.focus({ preventScroll: true });
+    loadNetworkUsage(node.node_id, detail.network || [], trafficSelect, app.querySelector("[data-network-usage]"));
     renderCharts(history);
   }
 
@@ -521,13 +522,49 @@
     return `<div class="chart-panel"><h3>${title}</h3><div class="legend">${legend}</div><div class="chart-wrap"><canvas id="${id}"></canvas></div></div>`;
   }
 
-  async function loadNetworkUsage(nodeID, panel) {
-    try {
-      const usage = await apiFetch(`/api/v1/nodes/${encodeURIComponent(nodeID)}/network-usage`);
-      if (panel.isConnected) renderNetworkUsage(panel, usage);
-    } catch (_) {
-      if (panel.isConnected) panel.innerHTML = '<div class="empty-inline">网络流量读取失败</div>';
+  function networkUsageSection(interfaces) {
+    const options = interfaces.map(({ interface_id, name, is_primary }) => {
+      return `<option value="${escapeHTML(interface_id)}">${escapeHTML(name)}${is_primary ? "（主网卡）" : ""}</option>`;
+    }).join("");
+    return `<section class="section">
+      <div class="section-head">
+        <div><h2>网络流量</h2><p>接收与发送用量 · 北京时间</p></div>
+        <label class="list-filter traffic-filter">统计网卡
+          <select id="traffic-interface"${interfaces.length ? "" : " disabled"}>
+            ${options}<option value="">全部网卡（可能重复计入）</option>
+          </select>
+        </label>
+      </div>
+      <div class="chart-panel" data-network-usage></div>
+    </section>`;
+  }
+
+  function loadNetworkUsage(nodeID, interfaces, select, panel) {
+    const previous = trafficInterfaceByNode.get(nodeID);
+    const primary = interfaces.find((item) => item.is_primary);
+    const previousAvailable = previous === "" || interfaces.some((item) => item.interface_id === previous);
+    select.value = previousAvailable ? previous : primary?.interface_id || "";
+    let requestSequence = 0;
+
+    async function refresh() {
+      const sequence = ++requestSequence;
+      const query = select.value ? `?interface_id=${encodeURIComponent(select.value)}` : "";
+      panel.innerHTML = '<div class="empty-inline">正在读取网络流量</div>';
+      try {
+        const usage = await apiFetch(`/api/v1/nodes/${encodeURIComponent(nodeID)}/network-usage${query}`);
+        if (panel.isConnected && sequence === requestSequence) renderNetworkUsage(panel, usage);
+      } catch (_) {
+        if (panel.isConnected && sequence === requestSequence) {
+          panel.innerHTML = '<div class="empty-inline">网络流量读取失败</div>';
+        }
+      }
     }
+
+    select.addEventListener("change", () => {
+      trafficInterfaceByNode.set(nodeID, select.value);
+      refresh();
+    });
+    refresh();
   }
 
   function trafficBytes(usage) {

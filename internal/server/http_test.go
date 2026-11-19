@@ -93,7 +93,7 @@ func (fake *fakeStore) GetNode(_ context.Context, nodeID string) (store.NodeDeta
 	}
 	return store.NodeDetail{}, store.ErrNotFound
 }
-func (fake *fakeStore) GetNodeNetworkUsage(context.Context, string) (store.NodeNetworkUsage, error) {
+func (fake *fakeStore) GetNodeNetworkUsage(context.Context, string, string) (store.NodeNetworkUsage, error) {
 	return store.NodeNetworkUsage{}, store.ErrNotFound
 }
 func (fake *fakeStore) DeleteNode(_ context.Context, nodeID string) error {

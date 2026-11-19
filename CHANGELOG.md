@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.28.1 - 2026-11-19
+
+### Fixed
+- Use the configured primary network interface by default for daily and month-to-date traffic, so traffic that crosses a physical interface and a virtual interface does not inflate the displayed totals. Use the interface selector to inspect another interface or the all-interface totals.
+
 ## v0.28.0 - 2026-11-19
 
 ### Added

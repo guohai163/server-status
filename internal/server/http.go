@@ -43,7 +43,7 @@ type dataStore interface {
 	SetPrimaryNetworkInterface(context.Context, string, string) error
 	UpdateNodeTags(context.Context, string, []string) error
 	GetNodeHistory(context.Context, string, string) (store.NodeHistory, error)
-	GetNodeNetworkUsage(context.Context, string) (store.NodeNetworkUsage, error)
+	GetNodeNetworkUsage(context.Context, string, string) (store.NodeNetworkUsage, error)
 	ListAlerts(context.Context, store.AlertListOptions) (store.AlertList, error)
 }
 
@@ -349,15 +349,20 @@ func (api *API) getNodeNetworkUsage(response http.ResponseWriter, request *http.
 		writeError(response, http.StatusBadRequest, "invalid node id")
 		return
 	}
+	interfaceID := request.URL.Query().Get("interface_id")
+	if interfaceID != "" && !report.ValidUUID(interfaceID) {
+		writeError(response, http.StatusBadRequest, "invalid interface id")
+		return
+	}
 	ctx, cancel := contextWithTimeout(request, 10*time.Second)
 	defer cancel()
-	usage, err := api.store.GetNodeNetworkUsage(ctx, nodeID)
+	usage, err := api.store.GetNodeNetworkUsage(ctx, nodeID, interfaceID)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(response, http.StatusNotFound, "node not found")
+		writeError(response, http.StatusNotFound, "node or interface not found")
 		return
 	}
 	if err != nil {
-		api.logger.Error("get node network usage failed", "node_id", nodeID, "error", err)
+		api.logger.Error("get node network usage failed", "node_id", nodeID, "interface_id", interfaceID, "error", err)
 		writeError(response, http.StatusInternalServerError, "cannot get node network usage")
 		return
 	}
