@@ -247,6 +247,17 @@
     return `<span class="${className}">${values.map((tag) => `<span class="tag-badge">${escapeHTML(tag)}</span>`).join("")}</span>`;
   }
 
+  function cardNetworkUsage(usage) {
+    if (!usage) return '<div class="card-traffic">未设置主网卡</div>';
+    const periods = [["昨日", usage.yesterday_bytes], ["今日", usage.today_bytes], ["本月", usage.month_to_date_bytes]];
+    const totals = periods.map(([label, bytes]) => {
+      return `<span>${label} <strong>${hasValue(bytes) ? formatBytes(bytes) : "—"}</strong></span>`;
+    }).join("");
+    return `<div class="card-traffic" aria-label="主网卡收发总量，按北京时间统计" title="主网卡收发总量 · 北京时间">
+      <span>主网卡</span><div class="card-traffic-totals">${totals}</div>
+    </div>`;
+  }
+
   function nodeCard(node) {
     const memoryPercent = node.memory_usage_percent || 0;
     const addressAndOS = `${node.primary_ip || "未获取 IP"} - ${formatOS(node)}`;
@@ -269,6 +280,7 @@
         <div class="io-item"><span>磁盘写入</span><strong>↑ ${formatRate(node.disk_write_bytes_per_second)}</strong></div>
         <div class="io-item load-item"><span>Load Average (1/5/15)</span><strong>${formatLoad(node.load_1)} / ${formatLoad(node.load_5)} / ${formatLoad(node.load_15)}</strong></div>
       </div>
+      ${cardNetworkUsage(node.primary_network_usage)}
     </button>`;
   }
 

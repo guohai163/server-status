@@ -27,6 +27,22 @@ type NodeNetworkUsage struct {
 	MonthDaysSeen int                `json:"month_days_seen"`
 }
 
+type PrimaryNetworkUsage struct {
+	YesterdayBytes   *int64 `json:"yesterday_bytes"`
+	TodayBytes       *int64 `json:"today_bytes"`
+	MonthToDateBytes *int64 `json:"month_to_date_bytes"`
+}
+
+func networkUsageDay(now time.Time) time.Time {
+	year, month, day := now.In(networkUsageLocation).Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, networkUsageLocation)
+}
+
+func networkUsageRawStart(now time.Time) time.Time {
+	// Raw partitions cover at least seven full UTC days plus today.
+	return now.UTC().Truncate(24*time.Hour).AddDate(0, 0, -7)
+}
+
 // GetNodeNetworkUsage sums the reported deltas for an interface, or for the whole node when interfaceID is empty.
 func (store *Store) GetNodeNetworkUsage(ctx context.Context, nodeID, interfaceID string) (NodeNetworkUsage, error) {
 	var exists bool
@@ -47,19 +63,14 @@ func (store *Store) GetNodeNetworkUsage(ctx context.Context, nodeID, interfaceID
 	}
 
 	now := time.Now().UTC()
-	localNow := now.In(networkUsageLocation)
-	year, month, day := localNow.Date()
-	today := time.Date(year, month, day, 0, 0, 0, 0, networkUsageLocation)
-	monthStart := time.Date(year, month, 1, 0, 0, 0, 0, networkUsageLocation)
+	today := networkUsageDay(now)
+	monthStart := today.AddDate(0, 0, 1-today.Day())
 	chartStart := today.AddDate(0, 0, 1-networkUsageDays)
 	start := chartStart
 	if monthStart.Before(start) {
 		start = monthStart
 	}
-	// Raw partitions cover at least seven full UTC days plus today. Use raw samples
-	// throughout that period to include the current hour and any late reports.
-	rawStart := now.Truncate(24*time.Hour).AddDate(0, 0, -7)
-	rows, err := store.pool.Query(ctx, nodeNetworkUsageSQL, nodeID, start.UTC(), rawStart, now, interfaceID)
+	rows, err := store.pool.Query(ctx, nodeNetworkUsageSQL, nodeID, start.UTC(), networkUsageRawStart(now), now, interfaceID)
 	if err != nil {
 		return NodeNetworkUsage{}, fmt.Errorf("query network usage: %w", err)
 	}
@@ -121,4 +132,56 @@ const nodeNetworkUsageSQL = `
 		   AND ($5 = '' OR interface_id = NULLIF($5, '')::uuid)
 	  ) traffic
 	 GROUP BY 1
+`
+
+func (store *Store) listPrimaryNetworkUsage(ctx context.Context, now time.Time) (map[string]*PrimaryNetworkUsage, error) {
+	today := networkUsageDay(now)
+	yesterday := today.AddDate(0, 0, -1)
+	monthStart := today.AddDate(0, 0, 1-today.Day())
+	rows, err := store.pool.Query(ctx, primaryNetworkUsageSQL,
+		yesterday.UTC(), today.UTC(), monthStart.UTC(), networkUsageRawStart(now), now.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("query primary network usage: %w", err)
+	}
+	defer rows.Close()
+	result := make(map[string]*PrimaryNetworkUsage)
+	for rows.Next() {
+		var nodeID string
+		var usage PrimaryNetworkUsage
+		if err := rows.Scan(&nodeID, &usage.YesterdayBytes, &usage.TodayBytes, &usage.MonthToDateBytes); err != nil {
+			return nil, fmt.Errorf("scan primary network usage: %w", err)
+		}
+		result[nodeID] = &usage
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate primary network usage: %w", err)
+	}
+	return result, nil
+}
+
+const primaryNetworkUsageSQL = `
+	WITH preferred AS (
+		SELECT preference.node_id, preference.interface_id
+		  FROM monitoring.node_network_preferences preference
+		  JOIN monitoring.network_interfaces interface
+		    ON interface.node_id = preference.node_id AND interface.id = preference.interface_id
+		 WHERE interface.removed_at IS NULL
+	), traffic AS (
+		SELECT hourly.node_id, hourly.hour_at AS sample_at, hourly.rx_bytes::numeric + hourly.tx_bytes AS bytes
+		  FROM monitoring.network_metric_hourly hourly
+		  JOIN preferred USING (node_id, interface_id)
+		 WHERE hourly.hour_at >= LEAST($1::timestamptz, $3::timestamptz) AND hourly.hour_at < $4
+		UNION ALL
+		SELECT sample.node_id, sample.bucket_at, sample.rx_bytes_delta::numeric + sample.tx_bytes_delta
+		  FROM monitoring.network_metric_samples sample
+		  JOIN preferred USING (node_id, interface_id)
+		 WHERE sample.bucket_at >= GREATEST(LEAST($1, $3), $4) AND sample.bucket_at < $5
+	)
+	SELECT preferred.node_id::text,
+	       (sum(bytes) FILTER (WHERE sample_at >= $1 AND sample_at < $2))::bigint,
+	       (sum(bytes) FILTER (WHERE sample_at >= $2))::bigint,
+	       (sum(bytes) FILTER (WHERE sample_at >= $3))::bigint
+	  FROM preferred
+	  LEFT JOIN traffic USING (node_id)
+	 GROUP BY preferred.node_id
 `

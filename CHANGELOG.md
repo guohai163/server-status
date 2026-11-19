@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.29.0 - 2026-11-20
+
+### Added
+- Show yesterday's, today's, and month-to-date traffic for the configured primary network interface in one compact row on each dashboard card. Totals include received and sent bytes and use Beijing time.
+
 ## v0.28.1 - 2026-11-19
 
 ### Fixed

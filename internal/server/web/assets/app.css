@@ -218,6 +218,10 @@ button { color: inherit; }
 .io-item strong { margin-top: 3px; color: var(--ink); font: 12px/18px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .load-item { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
 .load-item strong { flex: 0 0 auto; margin-top: 0; }
+.card-traffic { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); color: var(--quiet); font-size: 11px; }
+.card-traffic-totals { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.card-traffic-totals span { white-space: nowrap; }
+.card-traffic-totals strong { color: var(--ink); font: 600 11px/16px ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 .detail-head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 24px; }
 .back-button { flex: 0 0 auto; width: 36px; height: 36px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); cursor: pointer; font-size: 19px; }

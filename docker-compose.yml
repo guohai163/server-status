@@ -1,6 +1,6 @@
 services:
   central:
-    image: ghcr.io/guohai163/server-status-central:${SERVER_STATUS_VERSION:-0.28.1}
+    image: ghcr.io/guohai163/server-status-central:${SERVER_STATUS_VERSION:-0.29.0}
     restart: unless-stopped
     depends_on:
       db:

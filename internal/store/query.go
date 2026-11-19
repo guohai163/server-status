@@ -54,6 +54,8 @@ type NodeSummary struct {
 	DiskWriteBytesPerSec  float64           `json:"disk_write_bytes_per_second"`
 	NetworkRXBytesPerSec  float64           `json:"network_rx_bytes_per_second"`
 	NetworkTXBytesPerSec  float64           `json:"network_tx_bytes_per_second"`
+
+	PrimaryNetworkUsage *PrimaryNetworkUsage `json:"primary_network_usage,omitempty"`
 }
 
 type FilesystemStatus struct {
@@ -300,6 +302,16 @@ func (store *Store) ListNodes(ctx context.Context) ([]NodeSummary, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate nodes: %w", err)
+	}
+	rows.Close()
+	if len(result) > 0 {
+		usage, err := store.listPrimaryNetworkUsage(ctx, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		for i := range result {
+			result[i].PrimaryNetworkUsage = usage[result[i].NodeID]
+		}
 	}
 	return result, nil
 }
