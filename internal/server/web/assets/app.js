@@ -405,6 +405,7 @@
       const previousHistory = currentHistory.node_id === nodeID && currentHistory.range === selectedRange
         ? currentHistory : { resolution: "loading", points: [], gpus: [] };
       renderDetail(detail, previousHistory);
+      loadNetworkUsage(nodeID, app.querySelector("[data-network-usage]"));
       const historySubtitle = app.querySelector("[data-history-subtitle]");
       if (historySubtitle) historySubtitle.textContent = historyResolutionLabel("loading");
       updatedAt.textContent = `更新于 ${formatTime(new Date(), true)}`;
@@ -477,6 +478,10 @@
       </div>
       <div class="chart-grid gpu-history-grid" id="gpu-history-grid"></div>
     </section>
+    <section class="section">
+      <div class="section-head"><div><h2>网络流量</h2><p>各网卡收发合计 · 北京时间</p></div></div>
+      <div class="chart-panel" data-network-usage><div class="empty-inline">正在读取网络流量</div></div>
+    </section>
     <section class="section"><div class="section-head"><div><h2>硬件信息</h2><p>${node.system_model ? `服务器型号：${escapeHTML(node.system_model)} · ` : ""}${escapeHTML(node.architecture)} · Agent ${escapeHTML(node.agent_version)}</p></div></div>
       <div class="info-grid">
         <div class="info-block"><h3>CPU</h3>${cpuTable(detail.cpu_packages)}</div>
@@ -514,6 +519,100 @@
   function chartPanel(id, title, items) {
     const legend = items.map(([name, color]) => `<span class="legend-item" style="--color:var(${color})"><i></i>${name}</span>`).join("");
     return `<div class="chart-panel"><h3>${title}</h3><div class="legend">${legend}</div><div class="chart-wrap"><canvas id="${id}"></canvas></div></div>`;
+  }
+
+  async function loadNetworkUsage(nodeID, panel) {
+    try {
+      const usage = await apiFetch(`/api/v1/nodes/${encodeURIComponent(nodeID)}/network-usage`);
+      if (panel.isConnected) renderNetworkUsage(panel, usage);
+    } catch (_) {
+      if (panel.isConnected) panel.innerHTML = '<div class="empty-inline">网络流量读取失败</div>';
+    }
+  }
+
+  function trafficBytes(usage) {
+    return usage.rx_bytes + usage.tx_bytes;
+  }
+
+  function trafficBreakdown(usage) {
+    return `接收 ${formatBytes(usage.rx_bytes)} · 发送 ${formatBytes(usage.tx_bytes)}`;
+  }
+
+  function renderNetworkUsage(panel, { daily, month_start, month_to_date, month_days_seen }) {
+    const lastIndex = daily.length - 1;
+    const today = daily[lastIndex].date;
+    const monthDays = Number(today.slice(-2));
+    const maxBytes = Math.max(1, ...daily.map(({ usage }) => usage ? trafficBytes(usage) : 0));
+    const tickSize = Math.ceil(maxBytes / 4);
+    const axisMax = tickSize * 4;
+    const ticks = Array.from({ length: 5 }, (_, index) => formatBytes((4 - index) * tickSize));
+    const bars = daily.map(({ date, usage }) => {
+      const label = usage ? `合计 ${formatBytes(trafficBytes(usage))} · ${trafficBreakdown(usage)}` : "暂无记录";
+      const column = usage && trafficBytes(usage) > 0
+        ? `<span class="traffic-column" style="height:${trafficBytes(usage) / axisMax * 100}%">
+            <span class="traffic-rx" style="flex-grow:${usage.rx_bytes}"></span>
+            <span class="traffic-tx" style="flex-grow:${usage.tx_bytes}"></span>
+          </span>`
+        : `<span class="traffic-column ${usage ? "traffic-zero" : "traffic-missing"}"></span>`;
+      return `<button type="button" aria-label="${escapeHTML(`${date} ${label}`)}" aria-pressed="false" tabindex="-1">${column}</button>`;
+    }).join("");
+    const dates = [0, 7, 14, 21, lastIndex].map((index) => {
+      return `<span style="grid-column:${index + 1}">${escapeHTML(daily[index].date.slice(5))}</span>`;
+    }).join("");
+    const monthDetails = [
+      month_to_date ? trafficBreakdown(month_to_date) : "",
+      month_days_seen < monthDays ? `${month_days_seen} / ${monthDays} 天有记录` : ""
+    ].filter(Boolean).join(" · ");
+    panel.innerHTML = `<div class="traffic-month">
+      <div><h3>本月累计</h3><strong>${month_to_date ? formatBytes(trafficBytes(month_to_date)) : "暂无记录"}</strong></div>
+      <div>${escapeHTML(month_start)} 至 ${escapeHTML(today)}
+        <div>${monthDetails}</div>
+      </div>
+    </div>
+    <h3>近 30 天每日用量</h3>
+    <div class="legend traffic-legend">
+      <span class="legend-item" style="--color:var(--chart-rx)"><i></i>接收</span>
+      <span class="legend-item" style="--color:var(--chart-tx)"><i></i>发送</span>
+      <span class="legend-item"><i class="traffic-missing"></i>无记录</span>
+    </div>
+    <div class="traffic-plot">
+      <div class="traffic-axis" aria-hidden="true">${ticks.map((tick) => `<span>${tick}</span>`).join("")}</div>
+      <div class="traffic-gridlines" aria-hidden="true">${ticks.map(() => "<i></i>").join("")}</div>
+      <div class="traffic-bars" role="group" aria-label="近 30 天每日用量">${bars}</div>
+      <div class="traffic-dates" aria-hidden="true">${dates}</div>
+    </div>
+    <div class="traffic-day"></div>`;
+
+    const detail = panel.querySelector(".traffic-day");
+    const buttons = [...panel.querySelectorAll(".traffic-bars button")];
+    let selectedIndex = lastIndex;
+    function showDay(index) {
+      const { date, usage } = daily[index];
+      detail.textContent = usage
+        ? `${date} · 合计 ${formatBytes(trafficBytes(usage))} · ${trafficBreakdown(usage)}`
+        : `${date} · 暂无记录`;
+    }
+    function selectDay(index) {
+      buttons[selectedIndex].setAttribute("aria-pressed", "false");
+      buttons[selectedIndex].tabIndex = -1;
+      selectedIndex = index;
+      buttons[index].setAttribute("aria-pressed", "true");
+      buttons[index].tabIndex = 0;
+      showDay(index);
+    }
+    selectDay(lastIndex);
+    buttons.forEach((button, index) => {
+      button.addEventListener("pointerenter", () => showDay(index));
+      button.addEventListener("pointerleave", () => showDay(selectedIndex));
+      button.addEventListener("click", () => selectDay(index));
+      button.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        const next = clamp(index + (event.key === "ArrowLeft" ? -1 : 1), 0, lastIndex);
+        selectDay(next);
+        buttons[next].focus();
+      });
+    });
   }
 
   async function changeRange(nodeID, range) {

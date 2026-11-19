@@ -43,6 +43,7 @@ type dataStore interface {
 	SetPrimaryNetworkInterface(context.Context, string, string) error
 	UpdateNodeTags(context.Context, string, []string) error
 	GetNodeHistory(context.Context, string, string) (store.NodeHistory, error)
+	GetNodeNetworkUsage(context.Context, string) (store.NodeNetworkUsage, error)
 	ListAlerts(context.Context, store.AlertListOptions) (store.AlertList, error)
 }
 
@@ -68,6 +69,7 @@ func NewAPI(database dataStore, config Config, logger *slog.Logger) *API {
 	api.mux.HandleFunc("GET /api/v1/alerts", api.requireWebAccess(api.listAlerts))
 	api.mux.HandleFunc("GET /api/v1/nodes/{nodeID}", api.requireWebAccess(api.getNode))
 	api.mux.HandleFunc("GET /api/v1/nodes/{nodeID}/history", api.requireWebAccess(api.getNodeHistory))
+	api.mux.HandleFunc("GET /api/v1/nodes/{nodeID}/network-usage", api.requireWebAccess(api.getNodeNetworkUsage))
 	api.mux.HandleFunc("POST /api/v1/admin/nodes", api.requireAdmin(api.registerNode))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes", api.requireAdmin(api.listNodes))
 	api.mux.HandleFunc("GET /api/v1/admin/nodes/export", api.requireAdmin(api.exportNodes))
@@ -339,6 +341,27 @@ func (api *API) getNode(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(response, http.StatusOK, detail)
+}
+
+func (api *API) getNodeNetworkUsage(response http.ResponseWriter, request *http.Request) {
+	nodeID := request.PathValue("nodeID")
+	if !report.ValidUUID(nodeID) {
+		writeError(response, http.StatusBadRequest, "invalid node id")
+		return
+	}
+	ctx, cancel := contextWithTimeout(request, 10*time.Second)
+	defer cancel()
+	usage, err := api.store.GetNodeNetworkUsage(ctx, nodeID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(response, http.StatusNotFound, "node not found")
+		return
+	}
+	if err != nil {
+		api.logger.Error("get node network usage failed", "node_id", nodeID, "error", err)
+		writeError(response, http.StatusInternalServerError, "cannot get node network usage")
+		return
+	}
+	writeJSON(response, http.StatusOK, usage)
 }
 
 func (api *API) deleteNode(response http.ResponseWriter, request *http.Request) {

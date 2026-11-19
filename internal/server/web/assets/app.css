@@ -258,6 +258,32 @@ button { color: inherit; }
 .chart-tooltip { position: absolute; z-index: 3; top: 8px; min-width: 145px; padding: 7px 8px; pointer-events: none; border: 1px solid var(--control-line); border-radius: 4px; background: var(--tooltip-bg); box-shadow: 0 4px 14px var(--tooltip-shadow); color: var(--muted); font-size: 10px; line-height: 16px; }
 .chart-tooltip strong { color: var(--ink); }
 
+.traffic-month { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 24px; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 20px; }
+.traffic-month h3 { color: var(--ink); }
+.traffic-month strong { color: var(--ink); font-size: 24px; line-height: 30px; }
+.traffic-legend .legend-item i { width: 8px; height: 8px; border-radius: 1px; }
+.traffic-legend .legend-item i.traffic-missing { height: 0; border-top: 1px dashed var(--muted); }
+.traffic-plot { display: grid; grid-template-columns: max-content minmax(0, 1fr); grid-template-rows: 176px auto; gap: 8px 10px; margin: 10px 0; }
+.traffic-axis, .traffic-gridlines { grid-row: 1; display: flex; flex-direction: column; justify-content: space-between; }
+.traffic-axis { grid-column: 1; margin: -6px 0; text-align: right; }
+.traffic-axis, .traffic-dates { color: var(--chart-label); font-size: 10px; line-height: 12px; font-variant-numeric: tabular-nums; }
+.traffic-gridlines, .traffic-bars { grid-area: 1 / 2; }
+.traffic-gridlines i { border-top: 1px solid var(--chart-grid); }
+.traffic-bars, .traffic-dates { display: grid; grid-template-columns: repeat(30, minmax(0, 1fr)); }
+.traffic-bars button { min-width: 0; display: flex; align-items: end; justify-content: center; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.traffic-bars button:hover, .traffic-bars button[aria-pressed="true"] { background: var(--segmented-bg); }
+.traffic-bars button:focus-visible { outline: 1px solid var(--chart-hover); outline-offset: -1px; }
+.traffic-column { display: flex; flex-direction: column; width: 72%; max-width: 32px; border-radius: 2px 2px 0 0; overflow: hidden; }
+.traffic-rx { background: var(--chart-rx); }
+.traffic-tx { background: var(--chart-tx); }
+.traffic-zero { border-top: 2px solid var(--chart-rx); }
+.traffic-missing { border-top: 1px dashed var(--muted); }
+.traffic-dates { grid-area: 2 / 2; }
+.traffic-dates span { justify-self: center; white-space: nowrap; }
+.traffic-dates span:first-child { justify-self: start; }
+.traffic-dates span:last-child { justify-self: end; }
+.traffic-day { min-height: 20px; color: var(--muted); font-size: 12px; line-height: 20px; font-variant-numeric: tabular-nums; }
+
 .info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
 .info-block { min-width: 0; }
 .info-block h3 { margin: 0 0 9px; color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; }

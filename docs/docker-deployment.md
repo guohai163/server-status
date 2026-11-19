@@ -3,8 +3,8 @@
 在装有 Docker Compose 的服务器上新建一个目录，进入后下载两个文件。
 
 ```bash
-curl -fL -o docker-compose.yml https://github.com/guohai163/server-status/releases/download/v0.27.0/docker-compose.yml
-curl -fL -o .env https://github.com/guohai163/server-status/releases/download/v0.27.0/server-status.env.example
+curl -fL -o docker-compose.yml https://github.com/guohai163/server-status/releases/download/v0.28.0/docker-compose.yml
+curl -fL -o .env https://github.com/guohai163/server-status/releases/download/v0.28.0/server-status.env.example
 chmod 600 .env
 ```
 

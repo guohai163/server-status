@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.28.0 - 2026-11-19
+
+### Added
+- Show a stacked bar chart of the last 30 days of received and sent traffic for each node, along with the total since the first day of the month. Usage is summed across reported interfaces using Beijing time, and dates without samples are marked separately.
+- Use existing hourly traffic totals and recent minute samples, including the current hour, for network usage statistics.
+
 ## v0.27.0 - 2026-11-19
 
 ### Added
