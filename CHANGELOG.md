@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.27.0 - 2026-11-19
+
+### Added
+- Show the top 10 CPU, memory, disk I/O, and network consumers in Linux node details. CPU, disk I/O, and network rank individual threads, while memory ranks processes by resident memory.
+- Store the latest resource rankings per node with database migration V019. Network sampling uses bpftrace on Linux nodes with socket tracepoint support.
+
 ## v0.26.1 - 2026-11-18
 
 ### Fixed

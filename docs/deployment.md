@@ -27,7 +27,7 @@ curl http://10.12.54.200:8080/readyz
 
 数据库使用专用登录角色 `server_status_app`，该角色只继承 `server_status_writer`，没有超级用户、建库或建角色权限。
 
-升级时使用迁移账号按顺序执行尚未安装的迁移，当前最新为 `db/migrations/V018__raid_aware_storage_summary.sql`。`V016` 会立即删除 7 天窗口之外的原始指标分区；中央服务启动时只校验 V018 是否存在，不会使用运行时 writer 账号自动修改 schema。
+升级时使用迁移账号按顺序执行尚未安装的迁移，当前最新为 `db/migrations/V019__node_resource_rankings.sql`。`V016` 会立即删除 7 天窗口之外的原始指标分区。中央服务使用运行时 writer 账号启动时会校验 V019。使用 Docker 两文件部署时由中央服务自动执行迁移。
 
 中心服务启动后每分钟评估一次离线、文件系统容量、归一化负载、SMART、RAID 和温度告警，多实例通过 PostgreSQL advisory lock 避免重复写入。每小时维护任务同时删除恢复时间超过 365 天的告警，未恢复事件不会被清理。
 

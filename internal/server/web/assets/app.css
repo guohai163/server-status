@@ -244,6 +244,8 @@ button { color: inherit; }
 .segmented { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 5px; background: var(--segmented-bg); }
 .range-button { min-width: 42px; height: 29px; padding: 0 8px; border: 0; border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; }
 .range-button.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px var(--control-shadow); }
+.ranking-description { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+[data-rank-resource] { white-space: nowrap; }
 .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .gpu-history-grid { margin-top: 14px; }
 .chart-panel { min-width: 0; padding: 15px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }

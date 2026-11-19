@@ -177,6 +177,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V015__kvm_virtual_machines.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V016__raw_metric_retention.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V017__storage_host_writes.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V018__raid_aware_storage_summary.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V019__node_resource_rankings.sql
 ```
 
 中央服务应使用继承 `server_status_writer` 的独立登录角色，不要使用 PostgreSQL 超级用户。
@@ -216,6 +217,8 @@ curl http://127.0.0.1:8080/readyz
 ## 一个脚本部署 Agent
 
 目标节点不需要 Go、make、Python、Git 仓库或 SSH 服务，只需 Linux、`sudo`、`curl`、`crontab` 和 `sha256sum`。当前发布支持 `amd64/x86_64` 与 `arm64/aarch64`。
+
+Linux 节点详情页显示最近一次上报的资源占用前 10 名。CPU 和磁盘 I/O 按线程统计，需要两次采样。内存用进程常驻内存（RSS）排序，每个进程统计一次。网络以约 3 秒为窗口，按线程统计 IPv4/IPv6 套接字收发字节速率。磁盘 I/O 排行取决于 Agent 可读取的线程范围。网络采集需要在 Agent 的 PATH 中安装 `bpftrace`，内核需提供 `sock:sock_send_length` 和 `sock:sock_recv_length`，Agent 需有运行追踪的权限。可在节点上执行 `sudo bpftrace -l 'tracepoint:sock:sock_*_length'` 检查追踪点。资源排行上线时依次升级数据库至 V019、中心服务和 Linux Agent。
 
 温度从 Linux hwmon 读取。实体机的风扇转速、电压、电流和功率优先通过本地 `ipmitool -I open sensor list` 从 BMC/iDRAC 读取；IPMI 未提供的传感器类型继续从 hwmon 补充。传感器模块只在实体机详情展示，虚拟机不采集也不展示。Ubuntu/Debian 可执行 `sudo apt-get update && sudo apt-get install -y ipmitool`，RHEL/CentOS/Rocky/AlmaLinux 可执行 `sudo dnf install -y ipmitool` 或 `sudo yum install -y ipmitool`；安装后使用 `sudo ipmitool -I open sensor list` 验证本地 BMC 接口。缺少 `ipmitool`、`/dev/ipmi0` 或 IPMI 读取失败时，Agent 自动回退到 hwmon，不影响其他指标。
 

@@ -226,6 +226,15 @@ func (store *Store) Ingest(ctx context.Context, auth NodeAuth, payload report.Re
 	if err := replaceRAIDStatus(ctx, tx, auth.NodeID, bucketAt, payload.CollectedAt.UTC(), receivedAt, payload.Metrics.RAIDControllers); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO monitoring.node_resource_rankings (node_id, collected_at, rankings)
+		VALUES ($1::uuid, $2, NULLIF($3::jsonb, 'null'::jsonb))
+		ON CONFLICT (node_id) DO UPDATE
+		SET collected_at = EXCLUDED.collected_at, rankings = EXCLUDED.rankings
+		WHERE EXCLUDED.collected_at >= node_resource_rankings.collected_at
+	`, auth.NodeID, payload.CollectedAt.UTC(), payload.Metrics.ResourceRankings); err != nil {
+		return fmt.Errorf("save resource rankings: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit report: %w", err)
 	}

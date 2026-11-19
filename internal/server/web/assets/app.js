@@ -53,6 +53,7 @@
   ];
   let nodes = [];
   let selectedRange = "24h";
+  let selectedResourceRanking = "cpu";
   let currentDetail = null;
   let currentHistory = { points: [], gpus: [] };
   let currentGPUDevices = [];
@@ -437,6 +438,7 @@
 
   function renderDetail(detail, history) {
     const node = detail.node;
+    const focusedResource = document.activeElement?.dataset.rankResource;
     currentGPUDevices = detail.gpus || [];
     const alias = node.display_name && node.hostname !== "pending-registration" && node.hostname !== node.display_name && node.hostname !== node.primary_ip
       ? `<span>${escapeHTML(node.hostname)}</span>` : "";
@@ -461,6 +463,7 @@
       ${metricTile("磁盘 I/O", `↓ ${formatRate(node.disk_read_bytes_per_second)}`, `↑ ${formatRate(node.disk_write_bytes_per_second)}`)}
       ${metricTile("运行时间", formatDuration(node.uptime_seconds), `${escapeHTML(node.os_name)} ${escapeHTML(node.os_version)}`)}
     </div>
+    ${resourceRankingsSection(detail)}
     ${gpuSection(detail.gpus)}
     ${kvmSection(detail.kvm_virtual_machines)}
     ${temperatureSection(detail.temperatures)}
@@ -488,6 +491,19 @@
     const agentUpgradeButton = app.querySelector("[data-agent-upgrade]");
     if (agentUpgradeButton) agentUpgradeButton.addEventListener("click", () => openAgentUpdateDialog(node));
     app.querySelector("[data-delete-node]").addEventListener("click", () => openDeleteNodeDialog(node));
+    const rankingButtons = app.querySelectorAll("[data-rank-resource]");
+    rankingButtons.forEach((button) => {
+      if (button.dataset.rankResource === focusedResource) button.focus({ preventScroll: true });
+      button.addEventListener("click", () => {
+        selectedResourceRanking = button.dataset.rankResource;
+        rankingButtons.forEach((item) => {
+          const selected = item === button;
+          item.classList.toggle("active", selected);
+          item.setAttribute("aria-pressed", String(selected));
+        });
+        app.querySelector("#resource-ranking-results").innerHTML = resourceRankingResults(detail);
+      });
+    });
     app.querySelectorAll("[data-range]").forEach((button) => button.addEventListener("click", () => changeRange(node.node_id, button.dataset.range)));
     app.querySelectorAll("[data-primary-interface-id]").forEach((button) => button.addEventListener("click", () => {
       selectPrimaryNetworkInterface(node.node_id, button.dataset.primaryInterfaceId, button.dataset.interfaceName, button);
@@ -665,6 +681,72 @@
     if (!rows.length) return '<div class="table-wrap"><div class="empty-inline">暂无数据</div></div>';
     return `<div class="table-wrap"><table class="data-table"><thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
   }
+
+  function resourceRankingsSection(detail) {
+    const sample = detail.resource_rankings;
+    const buttons = [["cpu", "CPU"], ["memory", "内存"], ["disk_io", "磁盘 I/O"], ["network", "网络"]]
+      .map(([key, label]) => {
+        const selected = key === selectedResourceRanking;
+        return `<button class="range-button ${selected ? "active" : ""}" type="button" data-rank-resource="${key}" aria-pressed="${selected}" aria-controls="resource-ranking-results">${label}</button>`;
+      }).join("");
+    return `<section class="section" aria-labelledby="resource-ranking-heading">
+      <div class="section-head"><div><h2 id="resource-ranking-heading">资源占用排行 · 前 10</h2>
+        ${sample ? `<p>最近采样 ${formatTime(sample.collected_at, true)}</p>` : ""}
+      </div><div class="segmented" role="group" aria-label="排行指标">${buttons}</div></div>
+      <div id="resource-ranking-results">${resourceRankingResults(detail)}</div>
+    </section>`;
+  }
+
+  function resourceRankingResults(detail) {
+    const node = detail.node;
+    const sample = detail.resource_rankings;
+    const metric = selectedResourceRanking;
+    const byMemory = metric === "memory";
+    const byCPU = metric === "cpu";
+    const byNetwork = metric === "network";
+    const descriptions = {
+      cpu: "按两次采样之间的线程 CPU 使用率排序，100% 表示占满一个逻辑核心。",
+      memory: "按进程常驻内存（RSS）排序。同一进程的线程共享内存，进程只列一次。",
+      disk_io: "按两次采样之间的线程磁盘读写总速率排序。",
+      network: "按约 3 秒内的线程 IPv4/IPv6 套接字收发总速率排序。"
+    };
+    const unavailable = {
+      cpu: "等待有效的连续 CPU 采样",
+      memory: "暂未读取到进程内存",
+      disk_io: "等待连续采样，Agent 需要读取线程 I/O 的权限",
+      network: "需要 bpftrace、内核套接字追踪点和相应权限"
+    };
+    const rows = sample?.[metric];
+    if (!rows?.length) {
+      let message = rows ? "本次采样无活动记录" : unavailable[metric];
+      if (!sample) {
+        if (node.status === "pending") message = "等待 Agent 首次上报";
+        else if (isWindowsNode(node) || /^(macOS|darwin)/i.test(node.os_name || "")) message = "资源占用排行目前支持 Linux 节点";
+        else message = "等待支持资源排行的 Linux Agent 上报";
+      }
+      return `<p class="ranking-description">${descriptions[metric]}</p><div class="table-wrap"><div class="empty-inline">${message}</div></div>`;
+    }
+
+    const headers = ["排名", byMemory ? "进程" : "线程", "PID"];
+    if (!byMemory) headers.push("TID");
+    if (byMemory) headers.push("常驻内存");
+    else if (byCPU) headers.push("CPU 使用率");
+    else headers.push(byNetwork ? "接收" : "读取", byNetwork ? "发送" : "写入", "合计");
+
+    return `<p class="ranking-description">${descriptions[metric]}</p>${table(headers, rows.map((item, index) => {
+      const cells = [index + 1, escapeHTML(item.name || "—"), `<code>${escapeHTML(item.pid)}</code>`];
+      if (!byMemory) cells.push(`<code>${escapeHTML(item.tid)}</code>`);
+      if (byMemory) cells.push(formatBytes(item.rss_bytes));
+      else if (byCPU) cells.push(formatPercent(item.percent));
+      else {
+        const input = item.input_bytes_per_second;
+        const output = item.output_bytes_per_second;
+        cells.push(formatRate(input), formatRate(output), formatRate(input + output));
+      }
+      return `<tr>${cells.map((cell) => `<td>${cell}</td>`).join("")}</tr>`;
+    }))}`;
+  }
+
   function cpuTable(items) {
     return table(["型号", "核心拓扑", "最高频率"], (items || []).map((item) => {
       const classes = item.performance_cores || item.efficiency_cores

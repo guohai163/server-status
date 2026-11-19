@@ -134,16 +134,51 @@ type NetworkAddress struct {
 }
 
 type Metrics struct {
-	CPU             CPUMetrics             `json:"cpu"`
-	Memory          MemoryMetrics          `json:"memory"`
-	Disk            DiskMetrics            `json:"disk"`
-	Filesystems     []FilesystemMetrics    `json:"filesystems"`
-	Network         []NetworkMetrics       `json:"network"`
-	GPUs            []GPUMetrics           `json:"gpus,omitempty"`
-	Temperatures    []TemperatureMetrics   `json:"temperatures,omitempty"`
-	HardwareSensors []HardwareSensorMetric `json:"hardware_sensors,omitempty"`
-	StorageHealth   []StorageHealth        `json:"storage_health,omitempty"`
-	RAIDControllers []RAIDControllerStatus `json:"raid_controllers,omitempty"`
+	CPU              CPUMetrics             `json:"cpu"`
+	Memory           MemoryMetrics          `json:"memory"`
+	Disk             DiskMetrics            `json:"disk"`
+	Filesystems      []FilesystemMetrics    `json:"filesystems"`
+	Network          []NetworkMetrics       `json:"network"`
+	GPUs             []GPUMetrics           `json:"gpus,omitempty"`
+	Temperatures     []TemperatureMetrics   `json:"temperatures,omitempty"`
+	HardwareSensors  []HardwareSensorMetric `json:"hardware_sensors,omitempty"`
+	StorageHealth    []StorageHealth        `json:"storage_health,omitempty"`
+	RAIDControllers  []RAIDControllerStatus `json:"raid_controllers,omitempty"`
+	ResourceRankings *ResourceRankings      `json:"resource_rankings,omitempty"`
+}
+
+const ResourceRankingLimit = 10
+
+// A nil list means the metric is unavailable. An empty list is a valid sample
+// in which no task had a nonzero measurement.
+type ResourceRankings struct {
+	CPU     []ThreadCPUUsage     `json:"cpu"`
+	Memory  []ProcessMemoryUsage `json:"memory"`
+	DiskIO  []ThreadIOUsage      `json:"disk_io"`
+	Network []ThreadIOUsage      `json:"network"`
+}
+
+type ThreadIdentity struct {
+	PID  int    `json:"pid"`
+	TID  int    `json:"tid"`
+	Name string `json:"name"`
+}
+
+type ThreadCPUUsage struct {
+	ThreadIdentity
+	Percent float64 `json:"percent"`
+}
+
+type ProcessMemoryUsage struct {
+	PID      int    `json:"pid"`
+	Name     string `json:"name"`
+	RSSBytes uint64 `json:"rss_bytes"`
+}
+
+type ThreadIOUsage struct {
+	ThreadIdentity
+	InputBytesPerSecond  float64 `json:"input_bytes_per_second"`
+	OutputBytesPerSecond float64 `json:"output_bytes_per_second"`
 }
 
 type RAIDControllerStatus struct {

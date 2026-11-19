@@ -147,6 +147,8 @@ SELECT monitoring.rollup_hour($1::timestamptz);
 
 同一维护周期调用 `monitoring.prune_resolved_alert_events` 删除已恢复超过 365 天的告警。每分钟告警评估使用事务级 advisory lock，多个中心实例不会重复创建事件。
 
+V019 的 `node_resource_rankings` 每节点保留一份最新采样，按上报的采集时间更新。删除节点时同步删除该记录。
+
 ## 权限
 
 - `server_status_owner`：NOLOGIN，对 schema 和对象持有所有权。
@@ -178,6 +180,7 @@ psql -v ON_ERROR_STOP=1 -f db/migrations/V015__kvm_virtual_machines.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V016__raw_metric_retention.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V017__storage_host_writes.sql
 psql -v ON_ERROR_STOP=1 -f db/migrations/V018__raid_aware_storage_summary.sql
+psql -v ON_ERROR_STOP=1 -f db/migrations/V019__node_resource_rankings.sql
 psql -v ON_ERROR_STOP=1 -f db/verify/V001__verify.sql
 ```
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/guohai/server-status/internal/report"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -242,6 +243,12 @@ type NodeDetail struct {
 	KVMVirtualMachines []KVMVirtualMachine    `json:"kvm_virtual_machines"`
 	Filesystems        []FilesystemStatus     `json:"filesystems"`
 	Network            []NetworkStatus        `json:"network"`
+	ResourceRankings   *ResourceRankings      `json:"resource_rankings,omitempty"`
+}
+
+type ResourceRankings struct {
+	CollectedAt time.Time `json:"collected_at"`
+	report.ResourceRankings
 }
 
 type HistoryPoint struct {
@@ -349,11 +356,22 @@ func (store *Store) GetNode(ctx context.Context, nodeID string) (NodeDetail, err
 			return NodeDetail{}, err
 		}
 	}
+	rankings := new(ResourceRankings)
+	err = store.pool.QueryRow(ctx, `
+		SELECT collected_at, rankings
+		  FROM monitoring.node_resource_rankings
+		 WHERE node_id = $1::uuid AND rankings IS NOT NULL
+	`, nodeID).Scan(&rankings.CollectedAt, &rankings.ResourceRankings)
+	if errors.Is(err, pgx.ErrNoRows) {
+		rankings = nil
+	} else if err != nil {
+		return NodeDetail{}, fmt.Errorf("get resource rankings: %w", err)
+	}
 	return NodeDetail{
 		Node: summary, CPUPackages: cpuPackages, MemoryModules: memoryModules,
 		BlockDevices: blockDevices, RAIDControllers: raidControllers, Temperatures: temperatures,
 		HardwareSensors: hardwareSensors, GPUs: gpus, KVMVirtualMachines: kvmVirtualMachines,
-		Filesystems: filesystems, Network: network,
+		Filesystems: filesystems, Network: network, ResourceRankings: rankings,
 	}, nil
 }
 

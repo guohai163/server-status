@@ -159,6 +159,11 @@ func validateInventory(inventory Inventory) error {
 }
 
 func validateMetrics(inventory Inventory, metrics Metrics) error {
+	if metrics.ResourceRankings != nil {
+		if err := validateResourceRankings(*metrics.ResourceRankings); err != nil {
+			return err
+		}
+	}
 	if err := validateUnsignedBigints(
 		metrics.Memory.TotalBytes, metrics.Memory.UsedBytes, metrics.Memory.AvailableBytes,
 		metrics.Memory.CachedBytes, metrics.Memory.BuffersBytes, metrics.Memory.SwapTotalBytes,
@@ -366,6 +371,37 @@ func validateMetrics(inventory Inventory, metrics Metrics) error {
 				drive.SizeBytes == 0 || drive.SizeBytes > math.MaxInt64 || drive.SectorSizeBytes > math.MaxInt64 ||
 				drive.RebuildProgress != nil && (*drive.RebuildProgress < 0 || *drive.RebuildProgress > 100 || math.IsNaN(*drive.RebuildProgress) || math.IsInf(*drive.RebuildProgress, 0)) {
 				return fmt.Errorf("invalid RAID physical drive in slot %d", drive.Slot)
+			}
+		}
+	}
+	return nil
+}
+
+func validateResourceRankings(rankings ResourceRankings) error {
+	limit := ResourceRankingLimit
+	if len(rankings.CPU) > limit || len(rankings.Memory) > limit ||
+		len(rankings.DiskIO) > limit || len(rankings.Network) > limit {
+		return fmt.Errorf("resource rankings may contain at most %d rows per metric", limit)
+	}
+	validName := func(name string) bool { return len(name) <= 128 && !strings.ContainsRune(name, 0) }
+	validThread := func(item ThreadIdentity) bool {
+		return item.PID > 0 && item.TID > 0 && validName(item.Name)
+	}
+	for _, item := range rankings.CPU {
+		if !validThread(item.ThreadIdentity) || !(item.Percent > 0 && item.Percent <= 100) {
+			return errors.New("invalid thread CPU ranking")
+		}
+	}
+	for _, item := range rankings.Memory {
+		if item.PID <= 0 || !validName(item.Name) || item.RSSBytes == 0 || item.RSSBytes > math.MaxInt64 {
+			return errors.New("invalid process memory ranking")
+		}
+	}
+	for _, items := range [][]ThreadIOUsage{rankings.DiskIO, rankings.Network} {
+		for _, item := range items {
+			input, output := item.InputBytesPerSecond, item.OutputBytesPerSecond
+			if !validThread(item.ThreadIdentity) || !(input >= 0 && output >= 0 && input+output > 0 && input+output <= math.MaxInt64) {
+				return errors.New("invalid thread I/O ranking")
 			}
 		}
 	}

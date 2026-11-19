@@ -34,6 +34,7 @@ type Collector struct {
 	mu             sync.Mutex
 	previousNet    map[string]gnet.IOCountersStat
 	previousDisk   map[string]disk.IOCountersStat
+	previousTasks  map[taskKey]taskSample
 	lastCollection time.Time
 }
 
@@ -109,6 +110,13 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 	if err != nil {
 		return report.Report{}, err
 	}
+	var networkRanks chan []report.ThreadIOUsage
+	procRoot := ""
+	if runtime.GOOS == "linux" {
+		procRoot = hostPath(ctx, common.HostProcEnvKey, "/proc")
+		networkRanks = make(chan []report.ThreadIOUsage, 1)
+		go func() { networkRanks <- sampleThreadNetwork(ctx, procRoot) }()
+	}
 	gpus, gpuMetrics := collectNVIDIAGPUs(ctx)
 	kvmVirtualMachines, kvmInventoryCollected := collectKVMVirtualMachines(ctx)
 	temperatures := collectHWMONTemperatures("/sys/class/hwmon")
@@ -126,6 +134,11 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 	}
 	sort.Slice(temperatures, func(i, j int) bool { return temperatures[i].Key < temperatures[j].Key })
 
+	var rankings *report.ResourceRankings
+	if networkRanks != nil {
+		rankings = collector.collectTaskRankings(ctx, procRoot)
+		rankings.Network = <-networkRanks
+	}
 	now := time.Now().UTC()
 	collector.mu.Lock()
 	interval := config.Interval
@@ -186,14 +199,15 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 				SwapUsedBytes:  swapMemory.Used,
 				UptimeSeconds:  hostInfo.Uptime,
 			},
-			Disk:            diskMetrics,
-			Filesystems:     filesystemMetrics,
-			Network:         networkMetrics,
-			GPUs:            gpuMetrics,
-			Temperatures:    temperatures,
-			HardwareSensors: hardwareSensors,
-			StorageHealth:   storageHealth,
-			RAIDControllers: raidControllers,
+			Disk:             diskMetrics,
+			Filesystems:      filesystemMetrics,
+			Network:          networkMetrics,
+			GPUs:             gpuMetrics,
+			Temperatures:     temperatures,
+			HardwareSensors:  hardwareSensors,
+			StorageHealth:    storageHealth,
+			RAIDControllers:  raidControllers,
+			ResourceRankings: rankings,
 		},
 	}
 	report.NormalizeInventory(&payload.Inventory)
@@ -274,14 +288,7 @@ func linuxReportedPlatform(ctx context.Context, platform, version string) (strin
 		return platform, version
 	}
 
-	hostEnv, _ := ctx.Value(common.EnvKey).(common.EnvMap)
-	etcDir := hostEnv[common.HostEtcEnvKey]
-	if etcDir == "" {
-		etcDir = os.Getenv(string(common.HostEtcEnvKey))
-	}
-	if etcDir == "" {
-		etcDir = "/etc"
-	}
+	etcDir := hostPath(ctx, common.HostEtcEnvKey, "/etc")
 	contents, err := os.ReadFile(filepath.Join(etcDir, "os-release"))
 	if errors.Is(err, os.ErrNotExist) && filepath.Clean(etcDir) == "/etc" {
 		contents, err = os.ReadFile("/usr/lib/os-release")
@@ -307,6 +314,11 @@ func linuxReportedPlatform(ctx context.Context, platform, version string) (strin
 		return platform, version
 	}
 	return releaseID, releaseVersion
+}
+
+func hostPath(ctx context.Context, key common.EnvKeyType, fallback string) string {
+	hostEnv, _ := ctx.Value(common.EnvKey).(common.EnvMap)
+	return firstNonEmpty(hostEnv[key], os.Getenv(string(key)), fallback)
 }
 
 func classifyMachineType(virtualizationRole string) string {
