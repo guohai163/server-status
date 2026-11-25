@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.30.0 - 2026-11-25
+
+### Added
+- Show Docker container names alongside processes and threads in the CPU, memory, disk I/O, and network rankings for Linux nodes. The Agent matches process cgroups to containers on the local Docker daemon.
+
 ## v0.29.0 - 2026-11-20
 
 ### Added

@@ -384,8 +384,11 @@ func validateResourceRankings(rankings ResourceRankings) error {
 		return fmt.Errorf("resource rankings may contain at most %d rows per metric", limit)
 	}
 	validName := func(name string) bool { return len(name) <= 128 && !strings.ContainsRune(name, 0) }
+	validContainer := func(name string) bool {
+		return len(name) <= DockerContainerNameLimit && !strings.ContainsRune(name, 0)
+	}
 	validThread := func(item ThreadIdentity) bool {
-		return item.PID > 0 && item.TID > 0 && validName(item.Name)
+		return item.PID > 0 && item.TID > 0 && validName(item.Name) && validContainer(item.DockerContainer)
 	}
 	for _, item := range rankings.CPU {
 		if !validThread(item.ThreadIdentity) || !(item.Percent > 0 && item.Percent <= 100) {
@@ -393,7 +396,7 @@ func validateResourceRankings(rankings ResourceRankings) error {
 		}
 	}
 	for _, item := range rankings.Memory {
-		if item.PID <= 0 || !validName(item.Name) || item.RSSBytes == 0 || item.RSSBytes > math.MaxInt64 {
+		if item.PID <= 0 || !validName(item.Name) || !validContainer(item.DockerContainer) || item.RSSBytes == 0 || item.RSSBytes > math.MaxInt64 {
 			return errors.New("invalid process memory ranking")
 		}
 	}

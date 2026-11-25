@@ -138,6 +138,7 @@ func (collector *Collector) Collect(ctx context.Context, config Config) (report.
 	if networkRanks != nil {
 		rankings = collector.collectTaskRankings(ctx, procRoot)
 		rankings.Network = <-networkRanks
+		addDockerContainerNames(ctx, procRoot, rankings)
 	}
 	now := time.Now().UTC()
 	collector.mu.Lock()

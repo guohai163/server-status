@@ -875,14 +875,14 @@
       return `<p class="ranking-description">${descriptions[metric]}</p><div class="table-wrap"><div class="empty-inline">${message}</div></div>`;
     }
 
-    const headers = ["排名", byMemory ? "进程" : "线程", "PID"];
+    const headers = ["排名", byMemory ? "进程" : "线程", "Docker 容器", "PID"];
     if (!byMemory) headers.push("TID");
     if (byMemory) headers.push("常驻内存");
     else if (byCPU) headers.push("CPU 使用率");
     else headers.push(byNetwork ? "接收" : "读取", byNetwork ? "发送" : "写入", "合计");
 
     return `<p class="ranking-description">${descriptions[metric]}</p>${table(headers, rows.map((item, index) => {
-      const cells = [index + 1, escapeHTML(item.name || "—"), `<code>${escapeHTML(item.pid)}</code>`];
+      const cells = [index + 1, escapeHTML(item.name || "—"), escapeHTML(item.docker_container || "—"), `<code>${escapeHTML(item.pid)}</code>`];
       if (!byMemory) cells.push(`<code>${escapeHTML(item.tid)}</code>`);
       if (byMemory) cells.push(formatBytes(item.rss_bytes));
       else if (byCPU) cells.push(formatPercent(item.percent));

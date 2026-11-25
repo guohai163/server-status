@@ -220,6 +220,8 @@ curl http://127.0.0.1:8080/readyz
 
 Linux 节点详情页显示最近一次上报的资源占用前 10 名。CPU 和磁盘 I/O 按线程统计，需要两次采样。内存用进程常驻内存（RSS）排序，每个进程统计一次。网络以约 3 秒为窗口，按线程统计 IPv4/IPv6 套接字收发字节速率。磁盘 I/O 排行取决于 Agent 可读取的线程范围。网络采集需要在 Agent 的 PATH 中安装 `bpftrace`，内核需提供 `sock:sock_send_length` 和 `sock:sock_recv_length`，Agent 需有运行追踪的权限。可在节点上执行 `sudo bpftrace -l 'tracepoint:sock:sock_*_length'` 检查追踪点。资源排行上线时依次升级数据库至 V019、中心服务和 Linux Agent。
 
+排行中的「Docker 容器」列通过进程 cgroup 和本机 Docker 容器清单识别归属。该列需要 Agent 能运行 `docker` 并访问本机 `/var/run/docker.sock`。无法识别归属时该列显示 `—`。
+
 温度从 Linux hwmon 读取。实体机的风扇转速、电压、电流和功率优先通过本地 `ipmitool -I open sensor list` 从 BMC/iDRAC 读取；IPMI 未提供的传感器类型继续从 hwmon 补充。传感器模块只在实体机详情展示，虚拟机不采集也不展示。Ubuntu/Debian 可执行 `sudo apt-get update && sudo apt-get install -y ipmitool`，RHEL/CentOS/Rocky/AlmaLinux 可执行 `sudo dnf install -y ipmitool` 或 `sudo yum install -y ipmitool`；安装后使用 `sudo ipmitool -I open sensor list` 验证本地 BMC 接口。缺少 `ipmitool`、`/dev/ipmi0` 或 IPMI 读取失败时，Agent 自动回退到 hwmon，不影响其他指标。
 
 SMART 与 RAID 控制器透传是可选增强能力，需要目标节点安装 smartmontools 7.0 及以上，并让 Agent 以 root 运行；缺少 `smartctl`、设备不支持 SMART 或控制器/驱动不支持透传时，其他指标仍会正常上报，详情页显示 SMART 未采集。Agent 使用 `smartctl --scan-open --json` 获取每块盘所需的设备类型，因此支持 smartmontools 能识别的 MegaRAID、AACRAID、Areca、3ware、HighPoint、CCISS 和 SSSRAID 透传路径，不需要在 Agent 配置中手工枚举槽位。smartmontools 7.2 及以上还会为 SAS 盘上报 grown defect、ECC 纠错和 non-medium 错误累计值；中心依据前后两份已接收快照计算后两项的增量，避免把多年累计值直接判为当前风险。

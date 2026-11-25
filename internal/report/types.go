@@ -148,6 +148,7 @@ type Metrics struct {
 }
 
 const ResourceRankingLimit = 10
+const DockerContainerNameLimit = 256
 
 // A nil list means the metric is unavailable. An empty list is a valid sample
 // in which no task had a nonzero measurement.
@@ -159,9 +160,10 @@ type ResourceRankings struct {
 }
 
 type ThreadIdentity struct {
-	PID  int    `json:"pid"`
-	TID  int    `json:"tid"`
-	Name string `json:"name"`
+	PID             int    `json:"pid"`
+	TID             int    `json:"tid"`
+	Name            string `json:"name"`
+	DockerContainer string `json:"docker_container,omitempty"`
 }
 
 type ThreadCPUUsage struct {
@@ -170,9 +172,10 @@ type ThreadCPUUsage struct {
 }
 
 type ProcessMemoryUsage struct {
-	PID      int    `json:"pid"`
-	Name     string `json:"name"`
-	RSSBytes uint64 `json:"rss_bytes"`
+	PID             int    `json:"pid"`
+	Name            string `json:"name"`
+	RSSBytes        uint64 `json:"rss_bytes"`
+	DockerContainer string `json:"docker_container,omitempty"`
 }
 
 type ThreadIOUsage struct {
